@@ -10,19 +10,50 @@ import {
   View,
 } from 'react-native';
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function LoginScreen() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [status, setStatus] = useState('');
+  const [statusTone, setStatusTone] = useState<'error' | 'success'>('error');
 
   const handleLogin = () => {
-    if (!username.trim() || !password) {
-      setStatus('Faltan piezas: introduce usuario y contraseña.');
+    const trimmedEmail = email.trim();
+
+    if (!trimmedEmail && !password) {
+      setStatusTone('error');
+      setStatus('Faltan piezas: introduce correo y contraseña.');
       return;
     }
 
-    setStatus(`Pieza colocada: ${username.trim()}.`);
+    if (!trimmedEmail) {
+      setStatusTone('error');
+      setStatus('Faltan piezas: introduce correo.');
+      return;
+    }
+
+    if (!password) {
+      setStatusTone('error');
+      setStatus('Faltan piezas: introduce contraseña');
+      return;
+    }
+
+    if (password.length < 6) {
+      setStatusTone('error');
+      setStatus('La contraseña debe tener mínimo 6 caracteres.');
+      return;
+    }
+
+    if (!EMAIL_PATTERN.test(trimmedEmail)) {
+      setStatusTone('error');
+      setStatus('La pieza de correo no encaja: usa un correo válido.');
+      return;
+    }
+
+    setStatusTone('success');
+    setStatus(`Pieza colocada: ${trimmedEmail}.`);
   };
 
   return (
@@ -63,24 +94,27 @@ export default function LoginScreen() {
           <Text style={styles.eyebrow}>Puzzle de acceso</Text>
           <Text style={styles.title}>Coloca tus piezas para entrar.</Text>
           <Text style={styles.subtitle}>
-            Reúne usuario y contraseña para abrir tu tablero personal de Piezario.
+            Reúne correo y contraseña para abrir tu tablero personal de Piezario.
           </Text>
         </View>
 
         <View style={styles.form}>
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Usuario</Text>
+            <Text style={styles.label}>Correo</Text>
             <TextInput
-              accessibilityLabel="Usuario"
+              accessibilityLabel="Correo"
               autoCapitalize="none"
+              autoComplete="email"
               autoCorrect={false}
-              inputMode="text"
-              onChangeText={setUsername}
-              placeholder="tu.usuario"
+              inputMode="email"
+              keyboardType="email-address"
+              onChangeText={setEmail}
+              placeholder="nombre@correo.com"
               placeholderTextColor="#8D7B68"
               returnKeyType="next"
               style={styles.input}
-              value={username}
+              textContentType="emailAddress"
+              value={email}
             />
           </View>
 
@@ -137,7 +171,11 @@ export default function LoginScreen() {
             </View>
           </Pressable>
 
-          {status ? <Text style={styles.status}>{status}</Text> : null}
+          {status ? (
+            <Text style={[styles.status, statusTone === 'error' ? styles.statusError : styles.statusSuccess]}>
+              {status}
+            </Text>
+          ) : null}
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -404,9 +442,14 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   status: {
-    color: '#2B8F82',
     fontSize: 14,
     fontWeight: '800',
     lineHeight: 20,
+  },
+  statusError: {
+    color: '#C03232',
+  },
+  statusSuccess: {
+    color: '#2B8F82',
   },
 });
