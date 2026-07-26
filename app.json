@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "desapliwe",
-    "slug": "desapliwe",
+    "name": "Piezario",
+    "slug": "piezario",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "desapliwe",
+    "scheme": "piezario",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

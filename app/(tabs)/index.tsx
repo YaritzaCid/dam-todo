@@ -1,3 +1,4 @@
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -12,48 +13,57 @@ import {
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [status, setStatus] = useState('');
 
   const handleLogin = () => {
     if (!username.trim() || !password) {
-      setStatus('Introduce usuario y contraseña para continuar.');
+      setStatus('Faltan piezas: introduce usuario y contraseña.');
       return;
     }
 
-    setStatus(`Sesión preparada para ${username.trim()}.`);
+    setStatus(`Pieza colocada: ${username.trim()}.`);
   };
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.select({ ios: 'padding', default: undefined })}
       style={styles.screen}>
-      <View style={styles.backgroundOrbit} />
-      <View style={styles.backgroundGrid}>
-        {Array.from({ length: 9 }).map((_, index) => (
-          <View key={index} style={styles.gridLine} />
+      <View style={styles.cornerPiece} />
+      <View style={styles.floatingPiece} />
+      <View style={styles.boardGrid}>
+        {Array.from({ length: 10 }).map((_, index) => (
+          <View key={index} style={styles.gridDot} />
         ))}
       </View>
 
       <View style={styles.panel}>
-        <View style={styles.logoLockup} accessibilityLabel="Logo de Desapliwe">
+        <View style={styles.logoLockup} accessibilityLabel="Logo de Piezario">
           <View style={styles.logoMark}>
-            <View style={styles.logoCore}>
-              <Text style={styles.logoLetter}>D</Text>
+            <View style={[styles.puzzlePiece, styles.pieceA]}>
+              <View style={[styles.puzzleKnob, styles.knobRight]} />
             </View>
-            <View style={styles.logoRail} />
-            <View style={styles.logoNode} />
+            <View style={[styles.puzzlePiece, styles.pieceB]}>
+              <View style={[styles.puzzleKnob, styles.knobBottom]} />
+            </View>
+            <View style={[styles.puzzlePiece, styles.pieceC]}>
+              <View style={[styles.puzzleKnob, styles.knobTop]} />
+            </View>
+            <View style={[styles.puzzlePiece, styles.pieceD]}>
+              <Text style={styles.logoLetter}>P</Text>
+            </View>
           </View>
           <View>
-            <Text style={styles.logoName}>desapliwe</Text>
-            <Text style={styles.logoTagline}>Acceso al panel</Text>
+            <Text style={styles.logoName}>Piezario</Text>
+            <Text style={styles.logoTagline}>Cada pieza en su lugar</Text>
           </View>
         </View>
 
         <View style={styles.copy}>
-          <Text style={styles.eyebrow}>Entrada segura</Text>
-          <Text style={styles.title}>Vuelve al tablero donde dejaste el trabajo.</Text>
+          <Text style={styles.eyebrow}>Puzzle de acceso</Text>
+          <Text style={styles.title}>Coloca tus piezas para entrar.</Text>
           <Text style={styles.subtitle}>
-            Identifícate con tu usuario para continuar con tu espacio de desarrollo.
+            Reúne usuario y contraseña para abrir tu tablero personal de Piezario.
           </Text>
         </View>
 
@@ -67,7 +77,7 @@ export default function LoginScreen() {
               inputMode="text"
               onChangeText={setUsername}
               placeholder="tu.usuario"
-              placeholderTextColor="#7C8799"
+              placeholderTextColor="#8D7B68"
               returnKeyType="next"
               style={styles.input}
               value={username}
@@ -76,23 +86,55 @@ export default function LoginScreen() {
 
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Contraseña</Text>
-            <TextInput
-              accessibilityLabel="Contraseña"
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              placeholderTextColor="#7C8799"
-              returnKeyType="done"
-              secureTextEntry
-              style={styles.input}
-              value={password}
-            />
+            <View style={styles.passwordInputShell}>
+              <TextInput
+                accessibilityLabel="Contraseña"
+                onChangeText={setPassword}
+                placeholder="••••••••"
+                placeholderTextColor="#8D7B68"
+                returnKeyType="done"
+                secureTextEntry={Platform.OS !== 'web' && !isPasswordVisible}
+                style={[
+                  styles.input,
+                  styles.passwordInput,
+                  Platform.OS === 'web' && !isPasswordVisible && styles.webPasswordHidden,
+                ]}
+                value={password}
+              />
+              <Pressable
+                accessibilityLabel={isPasswordVisible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                accessibilityRole="button"
+                onPress={() => setIsPasswordVisible((visible) => !visible)}
+                style={({ pressed }) => [
+                  styles.passwordToggle,
+                  pressed && styles.passwordTogglePressed,
+                ]}>
+                <MaterialIcons
+                  color="#5B4265"
+                  name={isPasswordVisible ? 'visibility-off' : 'visibility'}
+                  size={22}
+                />
+              </Pressable>
+            </View>
           </View>
 
           <Pressable
             accessibilityRole="button"
             onPress={handleLogin}
             style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}>
-            <Text style={styles.buttonText}>Entrar</Text>
+            <Text style={styles.buttonText}>Encajar piezas</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: true }}
+            disabled
+            style={styles.registerOption}>
+            <View style={styles.registerPiece} />
+            <View style={styles.registerCopy}>
+              <Text style={styles.registerQuestion}>¿No tienes cuenta?</Text>
+              <Text style={styles.registerAction}>Crear cuenta · Próximamente</Text>
+            </View>
           </Pressable>
 
           {status ? <Text style={styles.status}>{status}</Text> : null}
@@ -108,29 +150,41 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
     padding: 24,
-    backgroundColor: '#07111F',
+    backgroundColor: '#F6E8CF',
   },
-  backgroundOrbit: {
+  cornerPiece: {
     position: 'absolute',
-    top: -120,
-    right: -120,
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    borderWidth: 42,
-    borderColor: '#1AD7B333',
+    top: -72,
+    right: -58,
+    width: 190,
+    height: 190,
+    borderRadius: 42,
+    backgroundColor: '#F2B84B',
+    transform: [{ rotate: '18deg' }],
   },
-  backgroundGrid: {
+  floatingPiece: {
     position: 'absolute',
-    left: 22,
-    top: 44,
-    bottom: 44,
+    left: -46,
+    bottom: 98,
+    width: 118,
+    height: 118,
+    borderRadius: 30,
+    backgroundColor: '#2DB7A3',
+    transform: [{ rotate: '-14deg' }],
+  },
+  boardGrid: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    top: 42,
+    flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  gridLine: {
-    width: 1,
-    height: 34,
-    backgroundColor: '#DCE8FF1A',
+  gridDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#5B426529',
   },
   panel: {
     width: '100%',
@@ -138,15 +192,15 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     gap: 30,
     padding: 28,
-    borderRadius: 34,
-    borderWidth: 1,
-    borderColor: '#DCE8FF24',
-    backgroundColor: '#F7FAFF',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 24 },
-    shadowOpacity: 0.3,
-    shadowRadius: 36,
-    elevation: 18,
+    borderRadius: 32,
+    borderWidth: 3,
+    borderColor: '#3E2A46',
+    backgroundColor: '#FFF9EC',
+    shadowColor: '#3E2A46',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    elevation: 16,
   },
   logoLockup: {
     flexDirection: 'row',
@@ -154,79 +208,100 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   logoMark: {
-    width: 66,
-    height: 66,
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 72,
+    height: 72,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    transform: [{ rotate: '-5deg' }],
   },
-  logoCore: {
-    width: 56,
-    height: 56,
-    justifyContent: 'center',
+  puzzlePiece: {
+    width: 34,
+    height: 34,
     alignItems: 'center',
-    borderRadius: 18,
-    backgroundColor: '#0D1B2F',
-    transform: [{ rotate: '-8deg' }],
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#3E2A46',
+  },
+  pieceA: {
+    borderTopLeftRadius: 16,
+    backgroundColor: '#E85D75',
+  },
+  pieceB: {
+    borderTopRightRadius: 16,
+    marginLeft: -1,
+    backgroundColor: '#F2B84B',
+  },
+  pieceC: {
+    borderBottomLeftRadius: 16,
+    marginTop: -1,
+    backgroundColor: '#2DB7A3',
+  },
+  pieceD: {
+    borderBottomRightRadius: 16,
+    marginTop: -1,
+    marginLeft: -1,
+    backgroundColor: '#5B4265',
+  },
+  puzzleKnob: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: '#3E2A46',
+    backgroundColor: '#FFF9EC',
+  },
+  knobRight: {
+    right: -9,
+    top: 9,
+  },
+  knobBottom: {
+    bottom: -9,
+    left: 9,
+  },
+  knobTop: {
+    top: -9,
+    left: 9,
   },
   logoLetter: {
-    color: '#F7FAFF',
-    fontSize: 34,
-    fontWeight: '900',
-    letterSpacing: -2,
-  },
-  logoRail: {
-    position: 'absolute',
-    right: 2,
-    bottom: 8,
-    width: 34,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#FFB84D',
-    transform: [{ rotate: '-28deg' }],
-  },
-  logoNode: {
-    position: 'absolute',
-    right: 0,
-    bottom: 5,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#1AD7B3',
-  },
-  logoName: {
-    color: '#0D1B2F',
-    fontSize: 26,
+    color: '#FFF9EC',
+    fontSize: 23,
     fontWeight: '900',
     letterSpacing: -1,
-    textTransform: 'lowercase',
+  },
+  logoName: {
+    color: '#3E2A46',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -0.7,
   },
   logoTagline: {
     marginTop: 2,
-    color: '#607089',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 1.4,
+    color: '#8D4E5B',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.1,
     textTransform: 'uppercase',
   },
   copy: {
     gap: 10,
   },
   eyebrow: {
-    color: '#0F8D7C',
+    color: '#2B8F82',
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 1.8,
     textTransform: 'uppercase',
   },
   title: {
-    color: '#0D1B2F',
-    fontSize: 34,
+    color: '#3E2A46',
+    fontSize: 35,
     fontWeight: '900',
-    lineHeight: 38,
-    letterSpacing: -1.4,
+    lineHeight: 39,
+    letterSpacing: -1.5,
   },
   subtitle: {
-    color: '#607089',
+    color: '#6F5B4B',
     fontSize: 16,
     lineHeight: 23,
   },
@@ -237,41 +312,101 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   label: {
-    color: '#26364D',
+    color: '#4B354F',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   input: {
     minHeight: 54,
-    borderWidth: 1,
-    borderColor: '#C8D5E8',
-    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#D6BE99',
+    borderRadius: 16,
     paddingHorizontal: 18,
-    color: '#0D1B2F',
-    backgroundColor: '#FFFFFF',
+    color: '#3E2A46',
+    backgroundColor: '#FFFDF7',
     fontSize: 16,
+  },
+  passwordInputShell: {
+    position: 'relative',
+  },
+  passwordInput: {
+    paddingRight: 56,
+  },
+  webPasswordHidden: {
+    WebkitTextSecurity: 'disc',
+  },
+  passwordToggle: {
+    position: 'absolute',
+    right: 8,
+    top: 7,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+  },
+  passwordTogglePressed: {
+    backgroundColor: '#F2E2C7',
   },
   button: {
     minHeight: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 18,
-    backgroundColor: '#0D1B2F',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#3E2A46',
+    backgroundColor: '#5B4265',
   },
   buttonPressed: {
-    transform: [{ translateY: 1 }],
-    backgroundColor: '#142944',
+    transform: [{ translateY: 2 }],
+    backgroundColor: '#4A3553',
   },
   buttonText: {
-    color: '#F7FAFF',
+    color: '#FFF9EC',
     fontSize: 16,
     fontWeight: '900',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
+  },
+  registerOption: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderWidth: 2,
+    borderColor: '#D6BE99',
+    borderStyle: 'dashed',
+    borderRadius: 16,
+    backgroundColor: '#FFFDF7',
+    opacity: 0.78,
+  },
+  registerPiece: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#3E2A46',
+    backgroundColor: '#F2B84B',
+    transform: [{ rotate: '10deg' }],
+  },
+  registerCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  registerQuestion: {
+    color: '#6F5B4B',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  registerAction: {
+    color: '#3E2A46',
+    fontSize: 15,
+    fontWeight: '900',
   },
   status: {
-    color: '#0F8D7C',
+    color: '#2B8F82',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     lineHeight: 20,
   },
 });
