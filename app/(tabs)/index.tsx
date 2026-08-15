@@ -1,8 +1,12 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useEffect, useState } from 'react';
+import { Directory, File, Paths } from 'expo-file-system';
+import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -23,6 +27,7 @@ import {
   registerUser,
   renameTodo,
   setTodoCompleted,
+  setTodoPhoto,
   type TodoItem,
   type UserSession,
 } from '@/lib/piezario-db';
@@ -32,6 +37,22 @@ type AuthMode = 'login' | 'register';
 type Feedback = { tone: 'error' | 'success'; message: string };
 const WEB_PASSWORD_HIDDEN_STYLE =
   Platform.OS === 'web' ? ({ WebkitTextSecurity: 'disc' } as unknown as TextStyle) : undefined;
+const TODO_PHOTO_DIRECTORY = 'todo-photos';
+
+async function persistTodoPhotoUri(photoUri: string, todoId: string) {
+  if (Platform.OS === 'web' || photoUri.startsWith('data:')) {
+    return photoUri;
+  }
+
+  const directory = new Directory(Paths.document, TODO_PHOTO_DIRECTORY);
+  directory.create({ idempotent: true, intermediates: true });
+
+  const source = new File(photoUri);
+  const destination = new File(directory, `${todoId}-${Date.now()}.jpg`);
+  source.copy(destination);
+
+  return destination.uri;
+}
 
 export default function PiezarioTodoApp() {
   const [authMode, setAuthMode] = useState<AuthMode>('login');
@@ -47,6 +68,13 @@ export default function PiezarioTodoApp() {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [isBooting, setIsBooting] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+  const [cameraFacing, setCameraFacing] = useState<CameraType>('back');
+  const [cameraTodoId, setCameraTodoId] = useState<string | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isTakingPhoto, setIsTakingPhoto] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -289,6 +317,78 @@ export default function PiezarioTodoApp() {
     }
   };
 
+  const openCameraForTodo = async (todo: TodoItem) => {
+    if (!session) {
+      return;
+    }
+
+    if (!cameraPermission?.granted) {
+      const nextPermission = await requestCameraPermission();
+
+      if (!nextPermission.granted) {
+        setFeedback({ tone: 'error', message: 'Activa la cámara para añadir una foto a la pieza.' });
+        return;
+      }
+    }
+
+    setCameraTodoId(todo.id);
+    setCameraFacing('back');
+    setIsCameraReady(false);
+    setIsCameraOpen(true);
+    setFeedback(null);
+  };
+
+  const closeCamera = () => {
+    if (isTakingPhoto) {
+      return;
+    }
+
+    setIsCameraOpen(false);
+    setCameraTodoId(null);
+    setIsCameraReady(false);
+  };
+
+  const toggleCameraFacing = () => {
+    setCameraFacing((currentFacing) => (currentFacing === 'back' ? 'front' : 'back'));
+  };
+
+  const handleTakeTodoPhoto = async () => {
+    if (!session || !cameraTodoId || !cameraRef.current) {
+      return;
+    }
+
+    setIsTakingPhoto(true);
+
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.82,
+        skipProcessing: false,
+      });
+
+      if (!photo?.uri) {
+        throw new Error('Camera returned no photo URI.');
+      }
+
+      const storedPhotoUri = await persistTodoPhotoUri(photo.uri, cameraTodoId);
+      const updatedAt = await setTodoPhoto(session.id, cameraTodoId, storedPhotoUri);
+      setTodos((currentTodos) =>
+        currentTodos.map((currentTodo) =>
+          currentTodo.id === cameraTodoId
+            ? { ...currentTodo, photoUri: storedPhotoUri, updatedAt }
+            : currentTodo
+        )
+      );
+      setFeedback({ tone: 'success', message: 'Foto encajada en la pieza.' });
+      setIsCameraOpen(false);
+      setCameraTodoId(null);
+      setIsCameraReady(false);
+    } catch {
+      setFeedback({ tone: 'error', message: 'No pudimos guardar la foto.' });
+    } finally {
+      setIsTakingPhoto(false);
+    }
+  };
+
   const switchAuthMode = (nextMode: AuthMode) => {
     setAuthMode(nextMode);
     setPassword('');
@@ -324,6 +424,7 @@ export default function PiezarioTodoApp() {
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         {session ? renderTodoBoard(session) : renderAuthPanel()}
       </ScrollView>
+      {renderCameraModal()}
     </KeyboardAvoidingView>
   );
 
@@ -546,6 +647,13 @@ export default function PiezarioTodoApp() {
             <Text style={[styles.todoTitle, todo.completed && styles.todoTitleCompleted]}>{todo.title}</Text>
           )}
           <Text style={styles.todoMeta}>{todo.completed ? 'Completada' : 'Pendiente'}</Text>
+          {todo.photoUri ? (
+            <Image
+              accessibilityLabel={`Foto de ${todo.title}`}
+              source={{ uri: todo.photoUri }}
+              style={styles.todoPhoto}
+            />
+          ) : null}
         </View>
 
         <View style={styles.todoActions}>
@@ -569,6 +677,14 @@ export default function PiezarioTodoApp() {
           ) : (
             <>
               <Pressable
+                accessibilityLabel={`${todo.photoUri ? 'Cambiar foto' : 'Añadir foto'} ${todo.title}`}
+                accessibilityRole="button"
+                disabled={isBusy || isTakingPhoto}
+                onPress={() => openCameraForTodo(todo)}
+                style={({ pressed }) => [styles.photoActionButton, pressed && styles.actionButtonPressed]}>
+                <Text style={styles.photoActionText}>{todo.photoUri ? 'Cambiar foto' : 'Añadir foto'}</Text>
+              </Pressable>
+              <Pressable
                 accessibilityLabel={`Editar ${todo.title}`}
                 accessibilityRole="button"
                 disabled={isBusy}
@@ -588,6 +704,63 @@ export default function PiezarioTodoApp() {
           )}
         </View>
       </View>
+    );
+  }
+
+  function renderCameraModal() {
+    return (
+      <Modal animationType="slide" onRequestClose={closeCamera} transparent visible={isCameraOpen}>
+        <View style={styles.cameraOverlay}>
+          <View style={styles.cameraPanel}>
+            {cameraPermission?.granted ? (
+              <CameraView
+                ref={cameraRef}
+                facing={cameraFacing}
+                mode="picture"
+                onCameraReady={() => setIsCameraReady(true)}
+                style={styles.cameraPreview}
+              />
+            ) : (
+              <View style={styles.cameraPermissionPanel}>
+                <Text style={styles.cameraPermissionTitle}>Falta permiso de cámara</Text>
+                <Text style={styles.cameraPermissionText}>
+                  Activa la cámara para tomar una foto y encajarla en esta pieza.
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.cameraActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isTakingPhoto}
+                onPress={closeCamera}
+                style={({ pressed }) => [styles.cameraGhostButton, pressed && styles.actionButtonPressed]}>
+                <Text style={styles.cameraGhostText}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isTakingPhoto}
+                onPress={toggleCameraFacing}
+                style={({ pressed }) => [styles.cameraGhostButton, pressed && styles.actionButtonPressed]}>
+                <Text style={styles.cameraGhostText}>Girar cámara</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isTakingPhoto || !cameraPermission?.granted || !isCameraReady}
+                onPress={handleTakeTodoPhoto}
+                style={({ pressed }) => [
+                  styles.cameraCaptureButton,
+                  pressed && styles.buttonPressed,
+                  (isTakingPhoto || !cameraPermission?.granted || !isCameraReady) && styles.disabledControl,
+                ]}>
+                <Text style={styles.buttonText}>
+                  {isTakingPhoto ? 'Tomando foto...' : isCameraReady ? 'Tomar foto' : 'Preparando cámara...'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     );
   }
 
@@ -1067,6 +1240,15 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase',
   },
+  todoPhoto: {
+    width: '100%',
+    height: 180,
+    marginTop: 8,
+    borderWidth: 2,
+    borderColor: '#3E2A46',
+    borderRadius: 18,
+    backgroundColor: '#E8D8BE',
+  },
   editInput: {
     minHeight: 46,
   },
@@ -1087,6 +1269,18 @@ const styles = StyleSheet.create({
   },
   actionText: {
     color: '#3E2A46',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  photoActionButton: {
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#2DB7A3',
+  },
+  photoActionText: {
+    color: '#FFF9EC',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -1116,5 +1310,75 @@ const styles = StyleSheet.create({
     color: '#A12B2B',
     fontSize: 13,
     fontWeight: '900',
+  },
+  cameraOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 18,
+    backgroundColor: '#1D1222D9',
+  },
+  cameraPanel: {
+    maxWidth: 720,
+    width: '100%',
+    maxHeight: '92%',
+    alignSelf: 'center',
+    gap: 14,
+    padding: 14,
+    borderWidth: 3,
+    borderColor: '#FFF9EC',
+    borderRadius: 28,
+    backgroundColor: '#3E2A46',
+  },
+  cameraPreview: {
+    minHeight: 420,
+    overflow: 'hidden',
+    borderRadius: 20,
+  },
+  cameraPermissionPanel: {
+    minHeight: 360,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: 22,
+    borderRadius: 20,
+    backgroundColor: '#FFF9EC',
+  },
+  cameraPermissionTitle: {
+    color: '#3E2A46',
+    fontSize: 21,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  cameraPermissionText: {
+    color: '#6F5B4B',
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
+  cameraActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  cameraGhostButton: {
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#FFF9EC',
+  },
+  cameraGhostText: {
+    color: '#3E2A46',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  cameraCaptureButton: {
+    minHeight: 48,
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    backgroundColor: '#E85D75',
   },
 });

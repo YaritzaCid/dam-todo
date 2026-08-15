@@ -17,6 +17,7 @@ export type TodoItem = {
   title: string;
   completed: boolean;
   createdAt: string;
+  photoUri: string | null;
   updatedAt: string;
 };
 
@@ -34,6 +35,7 @@ type TodoRow = {
   completed: number;
   created_at: string;
   updated_at: string;
+  photo_uri: string | null;
 };
 
 type AuthResult =
@@ -81,9 +83,19 @@ CREATE TABLE IF NOT EXISTS todos (
 );
 CREATE INDEX IF NOT EXISTS todos_user_updated_idx ON todos(user_id, updated_at DESC);
 `);
+  await ensureTodoPhotoColumn(db);
+
 
   return db;
 }
+async function ensureTodoPhotoColumn(db: SQLiteDatabase) {
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(todos)');
+
+  if (!columns.some((column) => column.name === 'photo_uri')) {
+    await db.execAsync('ALTER TABLE todos ADD COLUMN photo_uri TEXT;');
+  }
+}
+
 
 export async function registerUser(email: string, password: string): Promise<AuthResult> {
   const db = await getDatabase();
@@ -175,14 +187,14 @@ export async function clearSession() {
 export async function listTodos(userId: string): Promise<TodoItem[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<TodoRow>(
-    'SELECT id, user_id, title, completed, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY created_at DESC',
+    'SELECT id, user_id, title, completed, photo_uri, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY created_at DESC',
     userId
   );
 
   return rows.map(toTodoItem);
 }
 
-export async function createTodo(userId: string, title: string): Promise<TodoItem> {
+export async function createTodo(userId: string, title: string, photoUri: string | null = null): Promise<TodoItem> {
   const db = await getDatabase();
   const now = new Date().toISOString();
   const todo: TodoItem = {
@@ -192,14 +204,16 @@ export async function createTodo(userId: string, title: string): Promise<TodoIte
     completed: false,
     createdAt: now,
     updatedAt: now,
+    photoUri,
   };
 
   await db.runAsync(
-    'INSERT INTO todos (id, user_id, title, completed, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO todos (id, user_id, title, completed, photo_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
     todo.id,
     todo.userId,
     todo.title,
     0,
+    todo.photoUri,
     todo.createdAt,
     todo.updatedAt
   );
@@ -235,6 +249,20 @@ export async function renameTodo(userId: string, todoId: string, title: string) 
   return updatedAt;
 }
 
+export async function setTodoPhoto(userId: string, todoId: string, photoUri: string) {
+  const db = await getDatabase();
+  const updatedAt = new Date().toISOString();
+  await db.runAsync(
+    'UPDATE todos SET photo_uri = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+    photoUri,
+    updatedAt,
+    todoId,
+    userId
+  );
+
+  return updatedAt;
+}
+
 export async function deleteTodo(userId: string, todoId: string) {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM todos WHERE id = ? AND user_id = ?', todoId, userId);
@@ -255,5 +283,6 @@ function toTodoItem(row: TodoRow): TodoItem {
     completed: row.completed === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    photoUri: row.photo_uri,
   };
 }
