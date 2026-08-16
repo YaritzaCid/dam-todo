@@ -837,9 +837,6 @@ function syncRowFromRemote(remoteTodo: RemoteTodoRecord): TodoSyncRow {
 
 async function syncWebTodosWithRemote(userId: string): Promise<RemoteSyncResult> {
   const store = loadWebStore();
-  const remoteTodos = await fetchRemoteTodos(userId);
-  const remoteById = new Map(remoteTodos.map((todo) => [todo.id, todo]));
-  const remoteByLocalId = new Map(remoteTodos.map((todo) => [todo.localId, todo]));
   let pushed = 0;
   let pulled = 0;
   let deleted = 0;
@@ -852,6 +849,9 @@ async function syncWebTodosWithRemote(userId: string): Promise<RemoteSyncResult>
 
     store.syncRecords = store.syncRecords.filter((record) => record.localId !== syncRecord.localId);
   }
+  const remoteTodos = await fetchRemoteTodos(userId);
+  const remoteById = new Map(remoteTodos.map((todo) => [todo.id, todo]));
+  const remoteByLocalId = new Map(remoteTodos.map((todo) => [todo.localId, todo]));
 
   for (const localTodo of store.todos.filter((todo) => todo.userId === userId)) {
     const syncRecord = store.syncRecords.find((record) => record.localId === localTodo.id && record.userId === userId) ?? null;
@@ -940,9 +940,6 @@ export async function syncTodosWithRemote(userId: string): Promise<RemoteSyncRes
   const db = await getDatabase();
   const localTodos = await listTodos(userId);
   const syncRows = await listTodoSyncRows(db, userId);
-  const remoteTodos = await fetchRemoteTodos(userId);
-  const remoteById = new Map(remoteTodos.map((todo) => [todo.id, todo]));
-  const remoteByLocalId = new Map(remoteTodos.map((todo) => [todo.localId, todo]));
   const syncByLocalId = new Map(syncRows.map((row) => [row.local_id, row]));
   let pushed = 0;
   let pulled = 0;
@@ -956,6 +953,9 @@ export async function syncTodosWithRemote(userId: string): Promise<RemoteSyncRes
 
     await db.runAsync('DELETE FROM todo_sync WHERE local_id = ? AND user_id = ?', syncRow.local_id, userId);
   }
+  const remoteTodos = await fetchRemoteTodos(userId);
+  const remoteById = new Map(remoteTodos.map((todo) => [todo.id, todo]));
+  const remoteByLocalId = new Map(remoteTodos.map((todo) => [todo.localId, todo]));
 
   for (const localTodo of localTodos) {
     const syncRow = syncByLocalId.get(localTodo.id) ?? null;

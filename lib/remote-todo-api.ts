@@ -26,13 +26,66 @@ export type JsonPlaceholderTodo = {
   completed: boolean;
 };
 
+export type RemoteTodoApiErrorKind =
+  | 'missing-url'
+  | 'network'
+  | 'timeout'
+  | 'http'
+  | 'invalid-response'
+  | 'unexpected';
+
+export class RemoteTodoApiError extends Error {
+  readonly kind: RemoteTodoApiErrorKind;
+  readonly status: number | null;
+  readonly detail: unknown;
+
+  constructor(kind: RemoteTodoApiErrorKind, message: string, options?: { status?: number; detail?: unknown }) {
+    super(message);
+    this.name = 'RemoteTodoApiError';
+    this.kind = kind;
+    this.status = options?.status ?? null;
+    this.detail = options?.detail ?? null;
+  }
+}
+
+export function getRemoteTodoApiUserMessage(error: unknown) {
+  if (!(error instanceof RemoteTodoApiError)) {
+    return 'No pudimos sincronizar. Inténtalo de nuevo.';
+  }
+
+  if (error.kind === 'missing-url') {
+    return 'Falta configurar la URL de la API.';
+  }
+
+  if (error.kind === 'network' || error.kind === 'timeout') {
+    return 'No pudimos conectar con la API. Tus pendientes locales siguen disponibles.';
+  }
+
+  if (error.kind === 'http') {
+    return 'La API respondió con error. Inténtalo más tarde.';
+  }
+
+  if (error.kind === 'invalid-response') {
+    return 'La API devolvió datos inválidos.';
+  }
+
+  return 'No pudimos sincronizar. Inténtalo de nuevo.';
+}
+
+async function readRemoteJson(response: Response, action: string) {
+  try {
+    return await response.json();
+  } catch (error) {
+    throw new RemoteTodoApiError('invalid-response', `${action} devolvió JSON inválido.`, { detail: error });
+  }
+}
 type RemoteTodoBody = Omit<RemoteTodoRecord, 'id'>;
 
 function getRemoteTodosUrl() {
   const remoteTodosUrl = process.env.EXPO_PUBLIC_REMOTE_TODOS_URL;
 
   if (!remoteTodosUrl) {
-    throw new Error('Falta EXPO_PUBLIC_REMOTE_TODOS_URL en .env.');
+    throw new RemoteTodoApiError('missing-url', 'Falta EXPO_PUBLIC_REMOTE_TODOS_URL en .env.');
   }
 
   return remoteTodosUrl.replace(/\/$/, '');
@@ -44,6 +97,12 @@ async function fetchWithTimeout(input: string, init?: RequestInit) {
 
   try {
     return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new RemoteTodoApiError('timeout', 'La petición remota agotó el tiempo de espera.', { detail: error });
+    }
+
+    throw new RemoteTodoApiError('network', 'No se pudo conectar con la API remota.', { detail: error });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -51,7 +110,10 @@ async function fetchWithTimeout(input: string, init?: RequestInit) {
 
 function assertOk(response: Response, action: string) {
   if (!response.ok) {
-    throw new Error(`${action} falló con HTTP ${response.status}.`);
+    throw new RemoteTodoApiError('http', `${action} falló con HTTP ${response.status}.`, {
+      status: response.status,
+      detail: response.statusText,
+    });
   }
 }
 
@@ -114,10 +176,10 @@ function toRemoteBody(todo: TodoItem, importSource: string | null, importExterna
 export async function fetchRemoteTodos(userId: string) {
   const response = await fetchWithTimeout(getRemoteTodosUrl());
   assertOk(response, 'La lectura remota');
-  const rawTodos = await response.json();
+  const rawTodos = await readRemoteJson(response, 'La lectura remota');
 
   if (!Array.isArray(rawTodos)) {
-    return [];
+    throw new RemoteTodoApiError('invalid-response', 'La lectura remota no devolvió una lista.');
   }
 
   return rawTodos
@@ -139,10 +201,10 @@ export async function upsertRemoteTodo(
     body,
   });
   assertOk(response, remoteId ? 'La actualización remota' : 'La creación remota');
-  const normalizedTodo = normalizeRemoteTodo(await response.json());
+  const normalizedTodo = normalizeRemoteTodo(await readRemoteJson(response, 'La escritura remota'));
 
   if (!normalizedTodo) {
-    throw new Error('La API remota devolvió un pendiente inválido.');
+    throw new RemoteTodoApiError('invalid-response', 'La API remota devolvió un pendiente inválido.');
   }
 
   return normalizedTodo;
@@ -156,10 +218,10 @@ export async function deleteRemoteTodo(remoteId: string) {
 export async function fetchJsonPlaceholderTodos() {
   const response = await fetchWithTimeout(JSONPLACEHOLDER_TODOS_URL);
   assertOk(response, 'La importación desde JSONPlaceholder');
-  const rawTodos = await response.json();
+  const rawTodos = await readRemoteJson(response, 'La importación desde JSONPlaceholder');
 
   if (!Array.isArray(rawTodos)) {
-    return [];
+    throw new RemoteTodoApiError('invalid-response', 'JSONPlaceholder no devolvió una lista.');
   }
 
   return rawTodos

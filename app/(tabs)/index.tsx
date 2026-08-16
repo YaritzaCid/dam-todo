@@ -35,6 +35,7 @@ import {
   type TodoItem,
   type UserSession,
 } from '@/lib/alisto-db';
+import { getRemoteTodoApiUserMessage } from '@/lib/remote-todo-api';
 import { loginSchema, registrationSchema, todoTitleSchema } from '@/lib/validation-schemas';
 
 type AuthMode = 'login' | 'register';
@@ -572,10 +573,11 @@ export default function AlistoApp() {
         tone: 'success',
         message: `API sincronizada: ${result.pushed} enviados, ${result.pulled} recibidos, ${result.deleted} eliminados.`,
       });
-    } catch {
+    } catch (error) {
+      console.error('Remote todo sync failed', error);
       setFeedback({
         tone: 'error',
-        message: 'Sin conexión con la API. Tus pendientes locales siguen disponibles.',
+        message: getRemoteTodoApiUserMessage(error),
       });
     } finally {
       setRemoteAction(null);
