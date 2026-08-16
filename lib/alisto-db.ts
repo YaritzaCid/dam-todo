@@ -3,6 +3,13 @@ import * as SQLite from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { Platform } from 'react-native';
 
+import {
+  deleteRemoteTodo,
+  fetchJsonPlaceholderTodos,
+  fetchRemoteTodos,
+  upsertRemoteTodo,
+  type RemoteTodoRecord,
+} from './remote-todo-api';
 import { normalizeEmail } from './validation-schemas';
 
 const DATABASE_NAME = 'piezario.db';
@@ -64,13 +71,24 @@ type WebUser = {
   createdAt: string;
 };
 
+type WebSyncRecord = {
+  localId: string;
+  userId: string;
+  remoteId: string | null;
+  remoteSyncedAt: string | null;
+  importSource: string | null;
+  importExternalId: string | null;
+  deletedAt: string | null;
+};
+
 type WebStore = {
   users: WebUser[];
   todos: TodoItem[];
+  syncRecords: WebSyncRecord[];
   sessionUserId: string | null;
 };
 
-const emptyWebStore = (): WebStore => ({ users: [], todos: [], sessionUserId: null });
+const emptyWebStore = (): WebStore => ({ users: [], todos: [], syncRecords: [], sessionUserId: null });
 
 function loadWebStore(): WebStore {
   if (Platform.OS !== 'web' || typeof globalThis.localStorage === 'undefined') {
@@ -89,6 +107,7 @@ function loadWebStore(): WebStore {
     return {
       users: Array.isArray(parsedValue.users) ? parsedValue.users : [],
       todos: Array.isArray(parsedValue.todos) ? parsedValue.todos : [],
+      syncRecords: Array.isArray(parsedValue.syncRecords) ? parsedValue.syncRecords : [],
       sessionUserId: typeof parsedValue.sessionUserId === 'string' ? parsedValue.sessionUserId : null,
     };
   } catch {
@@ -231,8 +250,43 @@ function updateWebTodo(
 
 function deleteWebTodo(userId: string, todoId: string) {
   const store = loadWebStore();
+  const syncRecord = store.syncRecords.find((record) => record.localId === todoId && record.userId === userId);
+
+  if (syncRecord?.remoteId) {
+    upsertWebSyncRecord(store, {
+      ...syncRecord,
+      deletedAt: new Date().toISOString(),
+    });
+  }
+
   store.todos = store.todos.filter((todo) => todo.id !== todoId || todo.userId !== userId);
   saveWebStore(store);
+}
+
+function upsertWebSyncRecord(store: WebStore, nextRecord: WebSyncRecord) {
+  const recordIndex = store.syncRecords.findIndex(
+    (record) => record.localId === nextRecord.localId && record.userId === nextRecord.userId
+  );
+
+  if (recordIndex >= 0) {
+    store.syncRecords[recordIndex] = nextRecord;
+  } else {
+    store.syncRecords.push(nextRecord);
+  }
+}
+
+function toTodoFromRemote(remoteTodo: RemoteTodoRecord): TodoItem {
+  return {
+    id: remoteTodo.localId,
+    userId: remoteTodo.userId,
+    title: remoteTodo.title,
+    completed: remoteTodo.completed,
+    createdAt: remoteTodo.createdAt,
+    updatedAt: remoteTodo.updatedAt,
+    photoUri: remoteTodo.photoUri,
+    locationLatitude: remoteTodo.locationLatitude,
+    locationLongitude: remoteTodo.locationLongitude,
+  };
 }
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
@@ -280,6 +334,15 @@ CREATE TABLE IF NOT EXISTS todos (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS todo_sync (
+  local_id TEXT PRIMARY KEY NOT NULL,
+  user_id TEXT NOT NULL,
+  remote_id TEXT,
+  remote_synced_at TEXT,
+  import_source TEXT,
+  import_external_id TEXT,
+  deleted_at TEXT
+);
 `);
   await ensureDatabaseSchema(db);
   return db;
@@ -289,7 +352,19 @@ async function ensureDatabaseSchema(db: SQLiteDatabase) {
   await ensureUserOptionalColumns(db);
   await ensureSessionOptionalColumns(db);
   await ensureTodoOptionalColumns(db);
-  await db.execAsync('CREATE INDEX IF NOT EXISTS todos_user_updated_idx ON todos(user_id, updated_at DESC);');
+  await db.execAsync(`
+CREATE TABLE IF NOT EXISTS todo_sync (
+  local_id TEXT PRIMARY KEY NOT NULL,
+  user_id TEXT NOT NULL,
+  remote_id TEXT,
+  remote_synced_at TEXT,
+  import_source TEXT,
+  import_external_id TEXT,
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS todos_user_updated_idx ON todos(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS todo_sync_user_idx ON todo_sync(user_id, remote_id, import_source, import_external_id);
+`);
 }
 
 async function ensureUserOptionalColumns(db: SQLiteDatabase) {
@@ -617,7 +692,401 @@ export async function deleteTodo(userId: string, todoId: string) {
     return;
   }
   const db = await getDatabase();
+  const syncRecord = await db.getFirstAsync<TodoSyncRow>(
+    'SELECT local_id, user_id, remote_id, remote_synced_at, import_source, import_external_id, deleted_at FROM todo_sync WHERE local_id = ? AND user_id = ?',
+    todoId,
+    userId
+  );
+
+  if (syncRecord?.remote_id) {
+    await db.runAsync(
+      `INSERT INTO todo_sync (local_id, user_id, remote_id, remote_synced_at, import_source, import_external_id, deleted_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(local_id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+      todoId,
+      userId,
+      syncRecord.remote_id,
+      syncRecord.remote_synced_at,
+      syncRecord.import_source,
+      syncRecord.import_external_id,
+      new Date().toISOString()
+    );
+  }
+
   await db.runAsync('DELETE FROM todos WHERE id = ? AND user_id = ?', todoId, userId);
+}
+
+type TodoSyncRow = {
+  local_id: string;
+  user_id: string;
+  remote_id: string | null;
+  remote_synced_at: string | null;
+  import_source: string | null;
+  import_external_id: string | null;
+  deleted_at: string | null;
+};
+
+export type RemoteSyncResult = {
+  pushed: number;
+  pulled: number;
+  deleted: number;
+};
+
+export type JsonPlaceholderImportResult = {
+  imported: number;
+  skipped: number;
+  total: number;
+};
+
+async function listTodoSyncRows(db: SQLiteDatabase, userId: string) {
+  return db.getAllAsync<TodoSyncRow>(
+    'SELECT local_id, user_id, remote_id, remote_synced_at, import_source, import_external_id, deleted_at FROM todo_sync WHERE user_id = ?',
+    userId
+  );
+}
+
+async function upsertTodoSyncRow(db: SQLiteDatabase, row: TodoSyncRow) {
+  await db.runAsync(
+    `INSERT INTO todo_sync (local_id, user_id, remote_id, remote_synced_at, import_source, import_external_id, deleted_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(local_id) DO UPDATE SET
+  user_id = excluded.user_id,
+  remote_id = excluded.remote_id,
+  remote_synced_at = excluded.remote_synced_at,
+  import_source = excluded.import_source,
+  import_external_id = excluded.import_external_id,
+  deleted_at = excluded.deleted_at`,
+    row.local_id,
+    row.user_id,
+    row.remote_id,
+    row.remote_synced_at,
+    row.import_source,
+    row.import_external_id,
+    row.deleted_at
+  );
+}
+
+async function insertRemoteTodo(db: SQLiteDatabase, remoteTodo: RemoteTodoRecord) {
+  await db.runAsync(
+    `INSERT INTO todos (id, user_id, title, completed, photo_uri, location_latitude, location_longitude, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    remoteTodo.localId,
+    remoteTodo.userId,
+    remoteTodo.title,
+    remoteTodo.completed ? 1 : 0,
+    remoteTodo.photoUri,
+    remoteTodo.locationLatitude,
+    remoteTodo.locationLongitude,
+    remoteTodo.createdAt,
+    remoteTodo.updatedAt
+  );
+}
+
+async function updateLocalTodoFromRemote(db: SQLiteDatabase, remoteTodo: RemoteTodoRecord) {
+  await db.runAsync(
+    `UPDATE todos
+SET title = ?, completed = ?, photo_uri = ?, location_latitude = ?, location_longitude = ?, created_at = ?, updated_at = ?
+WHERE id = ? AND user_id = ?`,
+    remoteTodo.title,
+    remoteTodo.completed ? 1 : 0,
+    remoteTodo.photoUri,
+    remoteTodo.locationLatitude,
+    remoteTodo.locationLongitude,
+    remoteTodo.createdAt,
+    remoteTodo.updatedAt,
+    remoteTodo.localId,
+    remoteTodo.userId
+  );
+}
+
+function isRemoteNewer(remoteTodo: RemoteTodoRecord, localTodo: TodoItem, syncRow: TodoSyncRow | null) {
+  if (!syncRow?.remote_synced_at) {
+    return false;
+  }
+
+  return remoteTodo.updatedAt > localTodo.updatedAt && localTodo.updatedAt <= syncRow.remote_synced_at;
+}
+
+function syncRowFromRemote(remoteTodo: RemoteTodoRecord): TodoSyncRow {
+  return {
+    local_id: remoteTodo.localId,
+    user_id: remoteTodo.userId,
+    remote_id: remoteTodo.id,
+    remote_synced_at: new Date().toISOString(),
+    import_source: remoteTodo.importSource,
+    import_external_id: remoteTodo.importExternalId,
+    deleted_at: null,
+  };
+}
+
+async function syncWebTodosWithRemote(userId: string): Promise<RemoteSyncResult> {
+  const store = loadWebStore();
+  const remoteTodos = await fetchRemoteTodos(userId);
+  const remoteById = new Map(remoteTodos.map((todo) => [todo.id, todo]));
+  const remoteByLocalId = new Map(remoteTodos.map((todo) => [todo.localId, todo]));
+  let pushed = 0;
+  let pulled = 0;
+  let deleted = 0;
+
+  for (const syncRecord of store.syncRecords.filter((record) => record.userId === userId && record.deletedAt)) {
+    if (syncRecord.remoteId) {
+      await deleteRemoteTodo(syncRecord.remoteId);
+      deleted += 1;
+    }
+
+    store.syncRecords = store.syncRecords.filter((record) => record.localId !== syncRecord.localId);
+  }
+
+  for (const localTodo of store.todos.filter((todo) => todo.userId === userId)) {
+    const syncRecord = store.syncRecords.find((record) => record.localId === localTodo.id && record.userId === userId) ?? null;
+    const remoteTodo = syncRecord?.remoteId ? remoteById.get(syncRecord.remoteId) : remoteByLocalId.get(localTodo.id);
+    const nativeSyncRow = syncRecord ? {
+      local_id: syncRecord.localId,
+      user_id: syncRecord.userId,
+      remote_id: syncRecord.remoteId,
+      remote_synced_at: syncRecord.remoteSyncedAt,
+      import_source: syncRecord.importSource,
+      import_external_id: syncRecord.importExternalId,
+      deleted_at: syncRecord.deletedAt,
+    } : null;
+
+    if (remoteTodo && isRemoteNewer(remoteTodo, localTodo, nativeSyncRow)) {
+      const todoIndex = store.todos.findIndex((todo) => todo.id === localTodo.id && todo.userId === userId);
+      store.todos[todoIndex] = toTodoFromRemote(remoteTodo);
+      upsertWebSyncRecord(store, {
+        localId: remoteTodo.localId,
+        userId: remoteTodo.userId,
+        remoteId: remoteTodo.id,
+        remoteSyncedAt: new Date().toISOString(),
+        importSource: remoteTodo.importSource,
+        importExternalId: remoteTodo.importExternalId,
+        deletedAt: null,
+      });
+      pulled += 1;
+    } else {
+      const syncedTodo = await upsertRemoteTodo(
+        localTodo,
+        remoteTodo?.id ?? syncRecord?.remoteId ?? null,
+        syncRecord?.importSource ?? null,
+        syncRecord?.importExternalId ?? null
+      );
+      upsertWebSyncRecord(store, {
+        localId: localTodo.id,
+        userId,
+        remoteId: syncedTodo.id,
+        remoteSyncedAt: new Date().toISOString(),
+        importSource: syncedTodo.importSource,
+        importExternalId: syncedTodo.importExternalId,
+        deletedAt: null,
+      });
+      pushed += 1;
+    }
+  }
+
+  const localIds = new Set(store.todos.filter((todo) => todo.userId === userId).map((todo) => todo.id));
+  const importedKeys = new Set(
+    store.syncRecords
+      .filter((record) => record.userId === userId && record.importSource && record.importExternalId)
+      .map((record) => `${record.importSource}:${record.importExternalId}`)
+  );
+
+  for (const remoteTodo of remoteTodos) {
+    const importKey = remoteTodo.importSource && remoteTodo.importExternalId
+      ? `${remoteTodo.importSource}:${remoteTodo.importExternalId}`
+      : null;
+
+    if (localIds.has(remoteTodo.localId) || (importKey && importedKeys.has(importKey))) {
+      continue;
+    }
+
+    store.todos.push(toTodoFromRemote(remoteTodo));
+    upsertWebSyncRecord(store, {
+      localId: remoteTodo.localId,
+      userId: remoteTodo.userId,
+      remoteId: remoteTodo.id,
+      remoteSyncedAt: new Date().toISOString(),
+      importSource: remoteTodo.importSource,
+      importExternalId: remoteTodo.importExternalId,
+      deletedAt: null,
+    });
+    pulled += 1;
+  }
+
+  saveWebStore(store);
+  return { pushed, pulled, deleted };
+}
+
+export async function syncTodosWithRemote(userId: string): Promise<RemoteSyncResult> {
+  if (Platform.OS === 'web') {
+    return syncWebTodosWithRemote(userId);
+  }
+
+  const db = await getDatabase();
+  const localTodos = await listTodos(userId);
+  const syncRows = await listTodoSyncRows(db, userId);
+  const remoteTodos = await fetchRemoteTodos(userId);
+  const remoteById = new Map(remoteTodos.map((todo) => [todo.id, todo]));
+  const remoteByLocalId = new Map(remoteTodos.map((todo) => [todo.localId, todo]));
+  const syncByLocalId = new Map(syncRows.map((row) => [row.local_id, row]));
+  let pushed = 0;
+  let pulled = 0;
+  let deleted = 0;
+
+  for (const syncRow of syncRows.filter((row) => row.deleted_at)) {
+    if (syncRow.remote_id) {
+      await deleteRemoteTodo(syncRow.remote_id);
+      deleted += 1;
+    }
+
+    await db.runAsync('DELETE FROM todo_sync WHERE local_id = ? AND user_id = ?', syncRow.local_id, userId);
+  }
+
+  for (const localTodo of localTodos) {
+    const syncRow = syncByLocalId.get(localTodo.id) ?? null;
+    const remoteTodo = syncRow?.remote_id ? remoteById.get(syncRow.remote_id) : remoteByLocalId.get(localTodo.id);
+
+    if (remoteTodo && isRemoteNewer(remoteTodo, localTodo, syncRow)) {
+      await updateLocalTodoFromRemote(db, remoteTodo);
+      await upsertTodoSyncRow(db, syncRowFromRemote(remoteTodo));
+      pulled += 1;
+    } else {
+      const syncedTodo = await upsertRemoteTodo(
+        localTodo,
+        remoteTodo?.id ?? syncRow?.remote_id ?? null,
+        syncRow?.import_source ?? null,
+        syncRow?.import_external_id ?? null
+      );
+      await upsertTodoSyncRow(db, syncRowFromRemote(syncedTodo));
+      pushed += 1;
+    }
+  }
+
+  const localIds = new Set(localTodos.map((todo) => todo.id));
+  const importedKeys = new Set(
+    syncRows
+      .filter((row) => row.import_source && row.import_external_id)
+      .map((row) => `${row.import_source}:${row.import_external_id}`)
+  );
+
+  for (const remoteTodo of remoteTodos) {
+    const importKey = remoteTodo.importSource && remoteTodo.importExternalId
+      ? `${remoteTodo.importSource}:${remoteTodo.importExternalId}`
+      : null;
+
+    if (localIds.has(remoteTodo.localId) || (importKey && importedKeys.has(importKey))) {
+      continue;
+    }
+
+    await insertRemoteTodo(db, remoteTodo);
+    await upsertTodoSyncRow(db, syncRowFromRemote(remoteTodo));
+    pulled += 1;
+  }
+
+  return { pushed, pulled, deleted };
+}
+
+async function importJsonPlaceholderTodosWeb(userId: string): Promise<JsonPlaceholderImportResult> {
+  const importedTodos = await fetchJsonPlaceholderTodos();
+  const store = loadWebStore();
+  const importedKeys = new Set(
+    store.syncRecords
+      .filter((record) => record.userId === userId && record.importSource === 'jsonplaceholder')
+      .map((record) => record.importExternalId)
+  );
+  let imported = 0;
+  let skipped = 0;
+
+  for (const importedTodo of importedTodos) {
+    const externalId = String(importedTodo.id);
+
+    if (importedKeys.has(externalId)) {
+      skipped += 1;
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    const localId = Crypto.randomUUID();
+    store.todos.push({
+      id: localId,
+      userId,
+      title: importedTodo.title.trim(),
+      completed: importedTodo.completed,
+      createdAt: now,
+      updatedAt: now,
+      photoUri: null,
+      locationLatitude: null,
+      locationLongitude: null,
+    });
+    upsertWebSyncRecord(store, {
+      localId,
+      userId,
+      remoteId: null,
+      remoteSyncedAt: null,
+      importSource: 'jsonplaceholder',
+      importExternalId: externalId,
+      deletedAt: null,
+    });
+    importedKeys.add(externalId);
+    imported += 1;
+  }
+
+  saveWebStore(store);
+  return { imported, skipped, total: importedTodos.length };
+}
+
+export async function importJsonPlaceholderTodos(userId: string): Promise<JsonPlaceholderImportResult> {
+  if (Platform.OS === 'web') {
+    return importJsonPlaceholderTodosWeb(userId);
+  }
+
+  const importedTodos = await fetchJsonPlaceholderTodos();
+  const db = await getDatabase();
+  const syncRows = await listTodoSyncRows(db, userId);
+  const importedKeys = new Set(
+    syncRows
+      .filter((row) => row.import_source === 'jsonplaceholder')
+      .map((row) => row.import_external_id)
+  );
+  let imported = 0;
+  let skipped = 0;
+
+  for (const importedTodo of importedTodos) {
+    const externalId = String(importedTodo.id);
+
+    if (importedKeys.has(externalId)) {
+      skipped += 1;
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    const localId = Crypto.randomUUID();
+    await db.runAsync(
+      `INSERT INTO todos (id, user_id, title, completed, photo_uri, location_latitude, location_longitude, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      localId,
+      userId,
+      importedTodo.title.trim(),
+      importedTodo.completed ? 1 : 0,
+      null,
+      null,
+      null,
+      now,
+      now
+    );
+    await upsertTodoSyncRow(db, {
+      local_id: localId,
+      user_id: userId,
+      remote_id: null,
+      remote_synced_at: null,
+      import_source: 'jsonplaceholder',
+      import_external_id: externalId,
+      deleted_at: null,
+    });
+    importedKeys.add(externalId);
+    imported += 1;
+  }
+
+  return { imported, skipped, total: importedTodos.length };
 }
 
 async function hashPassword(email: string, password: string, salt: string) {

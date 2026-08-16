@@ -22,6 +22,7 @@ import {
   clearSession,
   createTodo,
   deleteTodo,
+  importJsonPlaceholderTodos,
   listTodos,
   loadSession,
   loginUser,
@@ -30,6 +31,7 @@ import {
   setTodoCompleted,
   setTodoPhoto,
   setTodoLocation,
+  syncTodosWithRemote,
   type TodoItem,
   type UserSession,
 } from '@/lib/alisto-db';
@@ -128,6 +130,7 @@ export default function AlistoApp() {
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [remoteAction, setRemoteAction] = useState<'sync' | 'import' | null>(null);
   const [isBooting, setIsBooting] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -549,6 +552,63 @@ export default function AlistoApp() {
     setTimeout(() => todoInputRef.current?.focus(), 0);
   };
 
+  const refreshTodos = async (userId: string) => {
+    const refreshedTodos = await listTodos(userId);
+    setTodos(refreshedTodos);
+  };
+
+  const handleSyncRemoteTodos = async () => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    setRemoteAction('sync');
+
+    try {
+      const result = await syncTodosWithRemote(session.id);
+      await refreshTodos(session.id);
+      setFeedback({
+        tone: 'success',
+        message: `API sincronizada: ${result.pushed} enviados, ${result.pulled} recibidos, ${result.deleted} eliminados.`,
+      });
+    } catch {
+      setFeedback({
+        tone: 'error',
+        message: 'Sin conexión con la API. Tus pendientes locales siguen disponibles.',
+      });
+    } finally {
+      setRemoteAction(null);
+      setIsBusy(false);
+    }
+  };
+
+  const handleImportJsonPlaceholderTodos = async () => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    setRemoteAction('import');
+
+    try {
+      const result = await importJsonPlaceholderTodos(session.id);
+      await refreshTodos(session.id);
+      setFeedback({
+        tone: 'success',
+        message: `Importación lista: ${result.imported} nuevos, ${result.skipped} duplicados, ${result.total} revisados.`,
+      });
+    } catch {
+      setFeedback({
+        tone: 'error',
+        message: 'No pudimos importar desde JSONPlaceholder. La lista local no se modificó.',
+      });
+    } finally {
+      setRemoteAction(null);
+      setIsBusy(false);
+    }
+  };
+
   const switchAuthMode = (nextMode: AuthMode) => {
     setAuthMode(nextMode);
     setName('');
@@ -888,6 +948,45 @@ export default function AlistoApp() {
                 isBusy && styles.disabledControl,
               ]}>
               <Text style={styles.buttonText}>Añadir pendiente</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.remotePanel}>
+          <View style={styles.remoteCopy}>
+            <Text style={styles.remoteTitle}>Integración API</Text>
+            <Text style={styles.remoteText}>
+              Sincroniza MockAPI o importa pendientes públicos sin perder el modo offline.
+            </Text>
+          </View>
+          <View style={styles.remoteActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isBusy }}
+              disabled={isBusy}
+              onPress={handleSyncRemoteTodos}
+              style={({ pressed }) => [
+                styles.syncButton,
+                pressed && styles.actionButtonPressed,
+                isBusy && styles.disabledControl,
+              ]}>
+              <Text style={styles.syncButtonText}>
+                {remoteAction === 'sync' ? 'Sincronizando...' : 'Sincronizar API'}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isBusy }}
+              disabled={isBusy}
+              onPress={handleImportJsonPlaceholderTodos}
+              style={({ pressed }) => [
+                styles.importButton,
+                pressed && styles.actionButtonPressed,
+                isBusy && styles.disabledControl,
+              ]}>
+              <Text style={styles.importButtonText}>
+                {remoteAction === 'import' ? 'Importando...' : 'Importar JSONPlaceholder'}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -1578,6 +1677,58 @@ const styles = StyleSheet.create({
     borderLeftColor: '#D89957',
     borderRadius: 22,
     backgroundColor: '#F7FAF7',
+  },
+  remotePanel: {
+    gap: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#C8D5CF',
+    borderRadius: 22,
+    backgroundColor: '#FAFCFA',
+  },
+  remoteCopy: {
+    gap: 4,
+  },
+  remoteTitle: {
+    color: '#183A37',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  remoteText: {
+    color: '#63746E',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  remoteActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  syncButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#275C5A',
+  },
+  syncButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  importButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#D89957',
+    borderRadius: 14,
+    backgroundColor: '#FFF3DF',
+  },
+  importButtonText: {
+    color: '#183A37',
+    fontSize: 13,
+    fontWeight: '900',
   },
   todoInputRow: {
     gap: 10,

@@ -1,80 +1,89 @@
-# Piezario
+# Alisto
 
-Piezario es una app Expo / React Native con TypeScript orientada a una experiencia de acceso visualmente coherente con puzzles: cada dato de acceso se presenta como una pieza que debe encajar antes de entrar al tablero.
+Alisto es una app Expo / React Native con TypeScript para gestionar pendientes privados por usuario. La pantalla principal permite crear cuenta, iniciar sesión, revisar un resumen del día y administrar tareas con foto y ubicación opcionales.
 
-## 1. Objetivos de la app
+## Objetivos
 
-- Informar a la comunidad puzzlera sobre eventos nacionales e internacionales de puzzles.
-- Permitir que cada persona tenga su usuario dentro de Piezario.
-- Facilitar que los usuarios compartan sus colecciones de rompecabezas.
-- Registrar y compartir tiempos de armado de rompecabezas.
-- Habilitar interacción social mediante comentarios entre usuarios.
-- Mantener una experiencia visual coherente con el mundo puzzle: piezas, tablero, encaje y progreso.
-- En la etapa actual, ofrecer una vista inicial de login con validaciones locales y una opción de registro marcada como `Próximamente`.
+- Crear cuentas locales con nombre, correo y contraseña.
+- Iniciar y restaurar sesión en el dispositivo.
+- Mantener pendientes separados por usuario.
+- Crear, completar, renombrar y eliminar pendientes.
+- Añadir foto a un pendiente mediante cámara.
+- Añadir coordenadas a un pendiente mediante ubicación del dispositivo.
+- Mantener mensajes de validación claros, en español y con estados de error/éxito visibles.
 
-## 2. Estructura de carpetas
+## Estructura de carpetas
 
 ```txt
 .
 ├── app/
 │   ├── _layout.tsx              # Layout raíz de Expo Router
-│   ├── modal.tsx                # Modal generado por la plantilla Expo
+│   ├── modal.tsx                # Modal starter de Expo
 │   └── (tabs)/
-│       ├── _layout.tsx          # Layout de tabs oculto para la pantalla de login
-│       ├── index.tsx            # Vista principal de login de Piezario
-│       └── explore.tsx          # Pantalla starter oculta del tab bar
+│       ├── _layout.tsx          # Tabs ocultas para usar index como superficie principal
+│       ├── index.tsx            # Login, registro, resumen y tablero de pendientes
+│       └── explore.tsx          # Pantalla starter oculta
 ├── assets/
-│   └── images/                  # Íconos e imágenes generadas por create-expo-app
-├── components/                  # Componentes starter reutilizables de Expo
+│   └── images/                  # Íconos e imágenes de Expo
+├── components/                  # Componentes starter reutilizables
 ├── constants/
-│   └── theme.ts                 # Tokens base de color/tipografía de la plantilla
-├── hooks/                       # Hooks starter para tema claro/oscuro
+│   └── theme.ts                 # Tokens base de color de la plantilla
+├── hooks/                       # Hooks starter de tema
+├── lib/
+│   ├── alisto-db.ts             # Persistencia local, sesión, cuentas y pendientes
+│   ├── remote-todo-api.ts       # Cliente HTTP de MockAPI y JSONPlaceholder
+│   └── validation-schemas.ts    # Validaciones de login, registro y pendientes
 ├── scripts/
 │   └── reset-project.js         # Script starter para reiniciar la plantilla
-├── app.json                     # Configuración Expo: nombre, slug, scheme, plugins
-├── package.json                 # Scripts, dependencias y metadatos del paquete
-├── bun.lock                     # Lockfile de Bun
+├── app.json                     # Configuración Expo, permisos y plugins
+├── package.json                 # Scripts, dependencias y metadatos
+├── bun.lock                     # Lockfile autoritativo de Bun
 ├── tsconfig.json                # Configuración TypeScript basada en Expo
 └── AGENTS.md                    # Reglas para agentes que trabajen en este repo
 ```
 
-## 3. Justificación de decisiones
+## Decisiones técnicas
 
-- **Expo SDK 54**: se mantiene porque es compatible con Expo Go durante la transición de SDK 57 indicada por la documentación de Expo.
-- **React Native + TypeScript**: TypeScript reduce errores en cambios incrementales y mantiene una base más mantenible para futuras pantallas.
-- **Bun como package manager**: el proyecto usa `bun.lock` y debe mantener Bun como gestor de paquetes.
-- **Expo Router**: se conserva la estructura generada por `create-expo-app`; la vista de login vive en `app/(tabs)/index.tsx` y la tab bar se oculta para ofrecer una pantalla de acceso limpia.
-- **Logo en React Native**: el logo de Piezario se construye con `View` y `Text`, sin añadir dependencias ni assets nuevos.
-- **Estética puzzle**: la paleta cálida, bordes marcados, piezas rotadas y copy de “piezas” refuerzan el concepto de la app.
-- **Validaciones locales**: el login aún no conecta con backend; valida formato de correo, presencia de contraseña y longitud mínima para dar feedback inmediato.
-- **Registro no funcional**: se muestra como opción deshabilitada con “Próximamente” para preparar la interfaz sin prometer un flujo todavía inexistente.
+- **Expo SDK 54 + Expo Router**: conserva compatibilidad con Expo Go y estructura de rutas generada por Expo.
+- **React Native + TypeScript**: mantiene tipos explícitos para sesión, pendientes y validaciones.
+- **Bun**: `bun.lock` es el lockfile autoritativo; usar `bun install` y `bun run <script>`.
+- **Persistencia local**: `expo-sqlite` guarda datos en Android/iOS; web usa `localStorage` como fallback.
+- **Cuentas locales**: la contraseña se guarda como hash con salt; no se guarda texto plano.
+- **Separación por usuario**: los pendientes se consultan y mutan por `userId`.
+- **Cámara y ubicación**: `expo-camera`, `expo-file-system` y `expo-location` permiten adjuntar foto y coordenadas a cada pendiente.
+- **UI en una ruta**: `app/(tabs)/index.tsx` contiene autenticación, resumen y tablero; la tab bar permanece oculta.
+- **API remota configurable**: `lib/remote-todo-api.ts` lee `process.env.EXPO_PUBLIC_REMOTE_TODOS_URL`; la URL real vive en `.env`.
+- **Modo offline primero**: las mutaciones locales no dependen de red; la sincronización con MockAPI es una acción explícita.
 
-## 4. Proveedor y modelos de IA
+## Funcionalidad actual
 
-Durante la construcción documentada en este repositorio se usó un arnés agéntico con:
+1. Registro local con nombre, correo, contraseña y confirmación.
+2. Login con correo y contraseña.
+3. Restauración de sesión al abrir la app.
+4. Resumen de pendientes activos y completados.
+5. CRUD de pendientes:
+   - crear pendiente;
+   - marcar como completado o activo;
+   - editar título;
+   - eliminar con confirmación.
+6. Adjuntos por pendiente:
+   - foto tomada con cámara;
+   - coordenadas obtenidas del dispositivo.
+7. Cierre de sesión sin borrar pendientes.
+8. Sincronización manual con MockAPI usando la URL configurada en `.env`.
+9. Importación de tareas desde JSONPlaceholder `/todos`, con deduplicación por origen e ID externo.
 
-- **Proveedor/modelo de asistencia**: `openai-codex/gpt-5.5` dentro de Oh My Pi.
-- **Context7 MCP**: usado para consultar documentación actual de Expo y React Native.
-- **frontend-design skill**: usado para definir la identidad visual de Piezario y orientar el estilo de puzzles.
+## Contratos de validación
 
-Estos modelos y herramientas pertenecen al proceso de desarrollo; no son dependencias de runtime de la app móvil.
+- El correo es requerido y debe tener formato básico válido.
+- La contraseña es requerida y debe tener al menos 6 caracteres.
+- El mensaje de contraseña ausente en login debe ser exactamente: `Faltan piezas: introduce contraseña`.
+- El título de pendiente no puede quedar vacío.
+- Los errores se muestran en rojo.
+- Los mensajes de éxito se muestran en verde.
+- La visibilidad de contraseña se controla solo con el icono personalizado.
 
-## 5. Constitución de arnés agéntico
-
-Las reglas de trabajo para agentes en Piezario son:
-
-1. Consultar documentación versionada de Expo SDK 54 antes de cambiar código relacionado con Expo.
-2. Usar Context7 para documentación actual de librerías, frameworks, SDKs y APIs.
-3. Mantener compatibilidad con Expo Go salvo instrucción explícita en contra.
-4. Usar Bun para instalación y ejecución de scripts.
-5. No introducir dependencias nativas que requieran development build sin justificarlo.
-6. Para cambios visuales, aplicar `frontend-design` y mantener coherencia con la identidad puzzle de Piezario.
-7. Verificar cambios de UI con smoke test cuando sea posible.
-8. Ejecutar `bun run lint` antes de entregar cambios permanentes.
-9. No implementar flujos simulados como reales: el registro está visible, pero no funcional.
-10. Mantener mensajes de validación claros y accesibles.
-
-## 6. Instrucciones de ejecución
+## Instrucciones de ejecución
 
 ### Requisitos
 
@@ -88,20 +97,28 @@ Las reglas de trabajo para agentes en Piezario son:
 bun install
 ```
 
-### Correr la app
+### Configurar API remota
 
-Iniciar el servidor de desarrollo:
+Crear `.env` en la raíz:
+
+```bash
+EXPO_PUBLIC_REMOTE_TODOS_URL=<URL de MockAPI>
+```
+
+`.env` queda ignorado por Git; no hardcodear la URL remota en código.
+
+### Correr la app
 
 ```bash
 bun run start
 ```
 
-Luego, desde la terminal de Expo:
+Desde la terminal de Expo:
 
-- Escanear el QR con Expo Go para abrir en Android/iOS.
-- Presionar `a` para Android.
-- Presionar `i` para iOS Simulator.
-- Presionar `w` para web.
+- escanear el QR con Expo Go para Android/iOS;
+- presionar `a` para Android;
+- presionar `i` para iOS Simulator;
+- presionar `w` para web.
 
 También puedes iniciar directamente por plataforma:
 
@@ -117,6 +134,21 @@ bun run web
 bun run lint
 ```
 
-### Nota sobre Expo Go
+## Verificación recomendada
 
-El proyecto no usa `expo-dev-client`, por lo que `expo start` abre con Expo Go por defecto. Si se añade una dependencia que requiera código nativo personalizado, habrá que revisar esta decisión antes de mantener la compatibilidad con Expo Go.
+1. Ejecutar `bunx tsc --noEmit`.
+2. Ejecutar `bun run lint`.
+3. Ejecutar `bunx expo-doctor`.
+4. Iniciar Expo Web con `bun run web`.
+5. Crear una cuenta local.
+6. Iniciar sesión.
+7. Crear, completar, editar y eliminar un pendiente.
+8. Sincronizar con MockAPI desde el panel `Integración API`.
+9. Importar JSONPlaceholder dos veces y confirmar que la segunda importación marca duplicados.
+10. Probar foto y ubicación cuando el entorno tenga permisos disponibles.
+11. Cerrar sesión y confirmar que los pendientes persisten al volver a entrar con la misma cuenta.
+12. Detener el servidor antes de terminar.
+
+## Nota sobre Expo Go
+
+El proyecto no usa `expo-dev-client`. Si se añade una dependencia que requiera código nativo personalizado, primero hay que revisar el impacto sobre Expo Go.
