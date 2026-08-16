@@ -436,7 +436,7 @@ async function ensureTodoOptionalColumns(db: SQLiteDatabase) {
   }
 
   const now = new Date().toISOString();
-  await db.runAsync("UPDATE todos SET title = 'Pendiente sin título' WHERE title IS NULL OR title = ''");
+  await db.runAsync("UPDATE todos SET title = 'Tarea sin título' WHERE title IS NULL OR title = ''");
   await db.runAsync('UPDATE todos SET completed = 0 WHERE completed IS NULL');
   await db.runAsync('UPDATE todos SET created_at = ? WHERE created_at IS NULL', now);
   await db.runAsync('UPDATE todos SET updated_at = COALESCE(created_at, ?) WHERE updated_at IS NULL', now);

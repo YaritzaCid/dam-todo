@@ -58,7 +58,7 @@ export function getRemoteTodoApiUserMessage(error: unknown) {
   }
 
   if (error.kind === 'network' || error.kind === 'timeout') {
-    return 'No pudimos conectar con la API. Tus pendientes locales siguen disponibles.';
+    return 'No pudimos conectar con la API. Tus tareas locales siguen disponibles.';
   }
 
   if (error.kind === 'http') {
@@ -204,7 +204,7 @@ export async function upsertRemoteTodo(
   const normalizedTodo = normalizeRemoteTodo(await readRemoteJson(response, 'La escritura remota'));
 
   if (!normalizedTodo) {
-    throw new RemoteTodoApiError('invalid-response', 'La API remota devolvió un pendiente inválido.');
+    throw new RemoteTodoApiError('invalid-response', 'La API remota devolvió una tarea inválida.');
   }
 
   return normalizedTodo;

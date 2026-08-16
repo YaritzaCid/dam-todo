@@ -1,16 +1,16 @@
 # Alisto
 
-Alisto es una app Expo / React Native con TypeScript para gestionar pendientes privados por usuario. Permite crear cuenta local, iniciar sesión, revisar un resumen del día y administrar tareas con foto, GPS, sincronización MockAPI e importación controlada desde JSONPlaceholder.
+Alisto es una app Expo / React Native con TypeScript para gestionar tareas privadas por usuario. Permite crear cuenta local, iniciar sesión, revisar un resumen del día y administrar tareas con foto, GPS, sincronización MockAPI e importación controlada desde JSONPlaceholder.
 
 ## Objetivos
 
 - Crear cuentas locales con nombre, correo y contraseña.
 - Iniciar y restaurar sesión en el dispositivo.
-- Mantener pendientes separados por usuario.
-- Crear, completar, renombrar y eliminar pendientes.
-- Adjuntar foto a un pendiente con cámara.
+- Mantener tareas separadas por usuario.
+- Crear, completar, renombrar y eliminar tareas.
+- Adjuntar foto a una tarea con cámara.
 - Adjuntar coordenadas GPS con fallback a última ubicación conocida.
-- Sincronizar manualmente pendientes con MockAPI sin romper modo offline.
+- Sincronizar manualmente tareas con MockAPI sin romper modo offline.
 - Importar hasta 5 tareas desde JSONPlaceholder evitando duplicados.
 - Mantener mensajes de validación claros, en español y con estados de error/éxito visibles.
 
@@ -23,7 +23,7 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 │   ├── modal.tsx                # Modal starter de Expo
 │   └── (tabs)/
 │       ├── _layout.tsx          # Tabs ocultas para usar index como superficie principal
-│       ├── index.tsx            # Login, registro, resumen y tablero de pendientes
+│       ├── index.tsx            # Login, registro, resumen y tablero de tareas
 │       └── explore.tsx          # Pantalla starter oculta
 ├── assets/
 │   └── images/                  # Íconos e imágenes de Expo
@@ -32,11 +32,11 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 │   └── theme.ts                 # Tokens base de color de la plantilla
 ├── hooks/                       # Hooks starter de tema
 ├── lib/
-│   ├── alisto-db.ts             # SQLite/localStorage, sesión, cuentas, pendientes y sync
+│   ├── alisto-db.ts             # SQLite/localStorage, sesión, cuentas, tareas y sync
 │   ├── remote-todo-api.ts       # Cliente HTTP de MockAPI y JSONPlaceholder
-│   ├── todo-camera.ts           # Captura y persistencia de foto por pendiente
+│   ├── todo-camera.ts           # Captura y persistencia de foto por tarea
 │   ├── todo-location.ts         # GPS actual, fallback last-known y mensajes de error
-│   └── validation-schemas.ts    # Validaciones de login, registro y pendientes
+│   └── validation-schemas.ts    # Validaciones de login, registro y tareas
 ├── __tests__/
 │   ├── alisto-sync-test.ts      # Sync MockAPI, JSONPlaceholder y deduplicación
 │   ├── remote-todo-api-test.ts  # Cliente API, errores HTTP/red/timeout/datos
@@ -66,12 +66,12 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 ## Decisiones técnicas
 
 - **Expo SDK 54 + Expo Router**: conserva compatibilidad con Expo Go y estructura de rutas generada por Expo.
-- **React Native + TypeScript**: mantiene tipos explícitos para sesión, pendientes, sync y validaciones.
+- **React Native + TypeScript**: mantiene tipos explícitos para sesión, tareas, sync y validaciones.
 - **Bun**: `bun.lock` es el lockfile autoritativo; usar `bun install` y `bun run <script>`.
-- **SQLite local**: `expo-sqlite` guarda usuarios, sesión, pendientes y `todo_sync` en Android/iOS.
-- **Fallback web**: `localStorage` replica usuarios, sesión, pendientes y registros de sync en web.
+- **SQLite local**: `expo-sqlite` guarda usuarios, sesión, tareas y `todo_sync` en Android/iOS.
+- **Fallback web**: `localStorage` replica usuarios, sesión, tareas y registros de sync en web.
 - **Cuentas locales**: la contraseña se guarda como hash con salt; no se guarda texto plano.
-- **Separación por usuario**: los pendientes se consultan y mutan por `userId`.
+- **Separación por usuario**: las tareas se consultan y mutan por `userId`.
 - **Cámara**: `expo-camera` captura foto; `expo-file-system` persiste archivo nativo; web/data URI se conserva sin copiar.
 - **GPS**: `expo-location` usa ubicación actual; si falla, intenta última ubicación conocida antes de mostrar error.
 - **MockAPI**: `lib/remote-todo-api.ts` lee `process.env.EXPO_PUBLIC_REMOTE_TODOS_URL`; no hay URL hardcodeada en código.
@@ -84,20 +84,20 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 1. Registro local con nombre, correo, contraseña y confirmación.
 2. Login con correo y contraseña.
 3. Restauración de sesión al abrir la app.
-4. Resumen de pendientes activos y completados.
-5. CRUD de pendientes:
-   - crear pendiente;
-   - marcar como completado o activo;
+4. Resumen de tareas pendientes y completadas.
+5. CRUD de tareas:
+   - crear tarea;
+   - marcar como completada o pendiente;
    - editar título;
    - eliminar con confirmación.
-6. Adjuntos por pendiente:
+6. Adjuntos por tarea:
    - foto tomada con cámara;
    - coordenadas obtenidas del dispositivo.
-7. Cierre de sesión sin borrar pendientes.
+7. Cierre de sesión sin borrar tareas.
 8. Sincronización manual con MockAPI:
    - `GET` remoto después de procesar tombstones;
-   - `POST` para pendientes nuevos;
-   - `PUT` para pendientes existentes;
+   - `POST` para tareas nuevas;
+   - `PUT` para tareas existentes;
    - `DELETE` para eliminados locales;
    - una tarea eliminada no vuelve a SQLite/localStorage en el mismo sync.
 9. Importación de tareas desde JSONPlaceholder `/todos`:
@@ -110,7 +110,7 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 - El correo es requerido y debe tener formato básico válido.
 - La contraseña es requerida y debe tener al menos 6 caracteres.
 - El mensaje de contraseña ausente en login debe ser exactamente: `Faltan piezas: introduce contraseña`.
-- El título de pendiente no puede quedar vacío.
+- El título de tarea no puede quedar vacío.
 - Los errores se muestran en rojo.
 - Los mensajes de éxito se muestran en verde.
 - La visibilidad de contraseña se controla solo con el icono personalizado.
@@ -165,7 +165,7 @@ bun install
 
 ### Configurar API remota
 
-Copiar `.env.example` a `.env` y quitar los signos `< >` si se usa la URL real:
+Copiar `.env.example` como `.env`:
 
 ```bash
 EXPO_PUBLIC_REMOTE_TODOS_URL=https://6a81d635400f94b23c6fac54.mockapi.io/api/v1/todos

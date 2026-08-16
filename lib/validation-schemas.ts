@@ -88,7 +88,7 @@ export const registrationSchema = z
 export const todoTitleSchema = z
   .string()
   .trim()
-  .min(1, { message: 'Escribe un pendiente antes de añadirlo.' });
+  .min(1, { message: 'Escribe una tarea antes de añadirla.' });
 
 export type LoginInput = z.input<typeof loginSchema>;
 export type LoginData = z.output<typeof loginSchema>;

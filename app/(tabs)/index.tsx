@@ -99,7 +99,7 @@ export default function AlistoApp() {
         setActiveView('welcome');
       } catch {
         if (isMounted) {
-          setFeedback({ tone: 'error', message: 'No pudimos cargar tus pendientes guardados.' });
+          setFeedback({ tone: 'error', message: 'No pudimos cargar tus tareas guardadas.' });
         }
       } finally {
         if (isMounted) {
@@ -204,7 +204,7 @@ export default function AlistoApp() {
       setActiveView('welcome');
       setTodoPendingDeletion(null);
       setAuthMode('login');
-      setFeedback({ tone: 'success', message: 'Sesión cerrada. Tus pendientes siguen guardados.' });
+      setFeedback({ tone: 'success', message: 'Sesión cerrada. Tus tareas siguen guardadas.' });
     } catch {
       setFeedback({ tone: 'error', message: 'No pudimos cerrar sesión.' });
     } finally {
@@ -230,9 +230,9 @@ export default function AlistoApp() {
       const todo = await createTodo(session.id, validation.data);
       setTodos((currentTodos) => [todo, ...currentTodos]);
       setNewTodoTitle('');
-      setFeedback({ tone: 'success', message: 'Pendiente añadido a la lista.' });
+      setFeedback({ tone: 'success', message: 'Tarea añadida a la lista.' });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos guardar el pendiente.' });
+      setFeedback({ tone: 'error', message: 'No pudimos guardar la tarea.' });
     } finally {
       setIsBusy(false);
     }
@@ -257,10 +257,10 @@ export default function AlistoApp() {
       );
       setFeedback({
         tone: 'success',
-        message: nextCompleted ? 'Pendiente completado.' : 'Pendiente marcado como activo.',
+        message: nextCompleted ? 'Tarea completada.' : 'Tarea marcada como pendiente.',
       });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos actualizar el pendiente.' });
+      setFeedback({ tone: 'error', message: 'No pudimos actualizar la tarea.' });
     } finally {
       setIsBusy(false);
     }
@@ -284,7 +284,7 @@ export default function AlistoApp() {
     const validation = todoTitleSchema.safeParse(editingTitle);
 
     if (!validation.success) {
-      setFeedback({ tone: 'error', message: validation.error.issues[0]?.message ?? 'El pendiente no puede estar vacío.' });
+      setFeedback({ tone: 'error', message: validation.error.issues[0]?.message ?? 'La tarea no puede estar vacía.' });
       return;
     }
 
@@ -305,9 +305,9 @@ export default function AlistoApp() {
         )
       );
       cancelEditingTodo();
-      setFeedback({ tone: 'success', message: 'Pendiente renombrado.' });
+      setFeedback({ tone: 'success', message: 'Tarea renombrada.' });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos editar el pendiente.' });
+      setFeedback({ tone: 'error', message: 'No pudimos editar la tarea.' });
     } finally {
       setIsBusy(false);
     }
@@ -323,9 +323,9 @@ export default function AlistoApp() {
     try {
       await deleteTodo(session.id, todo.id);
       setTodos((currentTodos) => currentTodos.filter((currentTodo) => currentTodo.id !== todo.id));
-      setFeedback({ tone: 'success', message: 'Pendiente eliminado de la lista.' });
+      setFeedback({ tone: 'success', message: 'Tarea eliminada de la lista.' });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos eliminar el pendiente.' });
+      setFeedback({ tone: 'error', message: 'No pudimos eliminar la tarea.' });
     } finally {
       setIsBusy(false);
     }
@@ -365,7 +365,7 @@ export default function AlistoApp() {
       const permission = await Location.requestForegroundPermissionsAsync();
 
       if (permission.status !== 'granted') {
-        setFeedback({ tone: 'error', message: 'Activa la ubicación para añadir coordenadas al pendiente.' });
+        setFeedback({ tone: 'error', message: 'Activa la ubicación para añadir coordenadas a la tarea.' });
         return;
       }
 
@@ -391,8 +391,8 @@ export default function AlistoApp() {
         tone: 'success',
         message:
           source === 'last-known'
-            ? 'Últimas coordenadas disponibles guardadas en el pendiente.'
-            : 'Coordenadas guardadas en el pendiente.',
+            ? 'Últimas coordenadas disponibles guardadas en la tarea.'
+            : 'Coordenadas guardadas en la tarea.',
       });
     } catch {
       setFeedback({
@@ -415,7 +415,7 @@ export default function AlistoApp() {
       const nextPermission = await requestCameraPermission();
 
       if (!nextPermission.granted) {
-        setFeedback({ tone: 'error', message: 'Activa la cámara para añadir una foto al pendiente.' });
+        setFeedback({ tone: 'error', message: 'Activa la cámara para añadir una foto a la tarea.' });
         return;
       }
     }
@@ -458,7 +458,7 @@ export default function AlistoApp() {
             : currentTodo
         )
       );
-      setFeedback({ tone: 'success', message: 'Foto guardada en el pendiente.' });
+      setFeedback({ tone: 'success', message: 'Foto guardada en la tarea.' });
       setIsCameraOpen(false);
       setCameraTodoId(null);
       setIsCameraReady(false);
@@ -568,7 +568,19 @@ export default function AlistoApp() {
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        alwaysBounceVertical
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={styles.scrollContent}
+        contentInsetAdjustmentBehavior="automatic"
+        decelerationRate="normal"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        overScrollMode="always"
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        style={styles.scrollView}>
         {session ? (activeView === 'todos' ? renderTodoBoard(session) : renderWelcomePanel(session)) : renderAuthPanel()}
       </ScrollView>
       {renderCameraModal()}
@@ -585,7 +597,7 @@ export default function AlistoApp() {
 
         <View style={styles.copy}>
           <Text style={styles.eyebrow}>Acceso privado</Text>
-          <Text style={styles.title}>Ordena lo pendiente con calma.</Text>
+          <Text style={styles.title}>Ordena tus tareas con calma.</Text>
           <Text style={styles.subtitle}>
             Alisto reúne tus tareas, fotos y ubicaciones en una lista clara para el día.
           </Text>
@@ -715,8 +727,8 @@ export default function AlistoApp() {
     const totalTodos = todos.length;
     const summaryText =
       totalTodos === 0
-        ? 'Aún no tienes pendientes. Crea el primero para organizar tu día.'
-        : `${pendingTodos.length} pendientes y ${completedTodos.length} completadas.`;
+        ? 'Aún no tienes tareas. Crea la primera para organizar tu día.'
+        : `${pendingTodos.length} tareas pendientes y ${completedTodos.length} completadas.`;
 
     return (
       <View style={[styles.panel, styles.welcomePanel]}>
@@ -729,10 +741,10 @@ export default function AlistoApp() {
             <Text style={styles.subtitle}>{summaryText}</Text>
           </View>
 
-          <View style={styles.summaryMosaic} accessibilityLabel="Resumen de pendientes">
+          <View style={styles.summaryMosaic} accessibilityLabel="Resumen de tareas">
             <View style={[styles.summaryPiece, styles.summaryPiecePending]}>
               <Text style={styles.summaryNumber}>{pendingTodos.length}</Text>
-              <Text style={styles.summaryLabel}>Pendientes</Text>
+              <Text style={styles.summaryLabel}>Tareas pendientes</Text>
             </View>
             <View style={[styles.summaryPiece, styles.summaryPieceCompleted]}>
               <Text style={styles.summaryNumber}>{completedTodos.length}</Text>
@@ -743,12 +755,16 @@ export default function AlistoApp() {
 
         <View style={styles.summaryColumns}>
           <View style={styles.summaryColumn}>
-            <Text style={styles.summaryColumnTitle}>Pendientes por hacer</Text>
+            <Text style={styles.summaryColumnTitle}>Tareas por hacer</Text>
             {pendingTodos.length === 0 ? (
-              <Text style={styles.summaryEmptyText}>No quedan pendientes activos.</Text>
+              <Text style={styles.summaryEmptyText}>No quedan tareas pendientes.</Text>
             ) : (
               <ScrollView
+                decelerationRate="normal"
+                keyboardShouldPersistTaps="handled"
                 nestedScrollEnabled
+                overScrollMode="never"
+                scrollEventThrottle={16}
                 showsVerticalScrollIndicator
                 style={styles.summaryTaskList}
                 contentContainerStyle={styles.summaryTaskListContent}>
@@ -765,7 +781,11 @@ export default function AlistoApp() {
               <Text style={styles.summaryEmptyText}>Completa una tarea para verla aquí.</Text>
             ) : (
               <ScrollView
+                decelerationRate="normal"
+                keyboardShouldPersistTaps="handled"
                 nestedScrollEnabled
+                overScrollMode="never"
+                scrollEventThrottle={16}
                 showsVerticalScrollIndicator
                 style={styles.summaryTaskList}
                 contentContainerStyle={styles.summaryTaskListContent}>
@@ -790,7 +810,7 @@ export default function AlistoApp() {
               pressed && styles.buttonPressed,
               isBusy && styles.disabledControl,
             ]}>
-            <Text style={styles.buttonText}>Ver/crear pendiente</Text>
+            <Text style={styles.buttonText}>Ver/crear tarea</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -816,9 +836,9 @@ export default function AlistoApp() {
 
         <View style={styles.boardHeader}>
           <View style={styles.copy}>
-            <Text style={styles.eyebrow}>Lista de pendientes</Text>
+            <Text style={styles.eyebrow}>Lista de tareas</Text>
             <Text style={styles.title}>Hola, {activeSession.name}</Text>
-            <Text style={styles.subtitle}>Tus pendientes están guardados en este dispositivo.</Text>
+            <Text style={styles.subtitle}>Tus tareas están guardadas en este dispositivo.</Text>
           </View>
           <View style={styles.headerActions}>
             <Pressable
@@ -849,11 +869,11 @@ export default function AlistoApp() {
         </View>
 
         <View style={styles.todoComposer}>
-          <Text style={styles.label}>Nuevo pendiente</Text>
+          <Text style={styles.label}>Nueva tarea</Text>
           <View style={styles.todoInputRow}>
             <TextInput
               ref={todoInputRef}
-              accessibilityLabel="Nuevo pendiente"
+              accessibilityLabel="Nueva tarea"
               editable={!isBusy}
               onChangeText={setNewTodoTitle}
               placeholder="Ej. Comprar material para clase"
@@ -872,7 +892,7 @@ export default function AlistoApp() {
                 pressed && styles.buttonPressed,
                 isBusy && styles.disabledControl,
               ]}>
-              <Text style={styles.buttonText}>Añadir pendiente</Text>
+              <Text style={styles.buttonText}>Añadir tarea</Text>
             </Pressable>
           </View>
         </View>
@@ -881,7 +901,7 @@ export default function AlistoApp() {
           <View style={styles.remoteCopy}>
             <Text style={styles.remoteTitle}>Integración API</Text>
             <Text style={styles.remoteText}>
-              Sincroniza MockAPI o importa pendientes públicos sin perder el modo offline.
+              Sincroniza MockAPI o importa tareas públicas sin perder el modo offline.
             </Text>
           </View>
           <View style={styles.remoteActions}>
@@ -923,7 +943,7 @@ export default function AlistoApp() {
             <View style={styles.emptyState}>
               <View style={styles.emptyPiece} />
               <Text style={styles.emptyTitle}>Tu lista está en blanco.</Text>
-              <Text style={styles.emptyText}>Añade el primer pendiente para verlo aquí.</Text>
+              <Text style={styles.emptyText}>Añade la primera tarea para verla aquí.</Text>
             </View>
           ) : (
             todos.map((todo) => renderTodoItem(todo))
@@ -939,7 +959,7 @@ export default function AlistoApp() {
     return (
       <View key={todo.id} style={[styles.todoCard, todo.completed && styles.todoCardCompleted]}>
         <Pressable
-          accessibilityLabel={`${todo.completed ? 'Marcar pendiente' : 'Completar'} ${todo.title}`}
+          accessibilityLabel={`${todo.completed ? 'Marcar como pendiente' : 'Completar'} ${todo.title}`}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: todo.completed, disabled: isBusy }}
           disabled={isBusy}
@@ -959,7 +979,7 @@ export default function AlistoApp() {
               autoFocus
               editable={!isBusy}
               onChangeText={setEditingTitle}
-              placeholder="Nombre del pendiente"
+              placeholder="Nombre de la tarea"
               placeholderTextColor="#7F8A86"
               style={[styles.input, styles.editInput]}
               value={editingTitle}
@@ -1056,7 +1076,7 @@ export default function AlistoApp() {
       <Modal animationType="fade" onRequestClose={cancelDeleteTodo} transparent visible>
         <View style={styles.confirmOverlay}>
           <View style={styles.confirmPanel}>
-            <Text style={styles.confirmTitle}>Eliminar pendiente</Text>
+            <Text style={styles.confirmTitle}>Eliminar tarea</Text>
             <Text style={styles.confirmText}>
               {`¿Quieres eliminar "${todoPendingDeletion.title}"? Esta acción no se puede deshacer.`}
             </Text>
@@ -1109,7 +1129,7 @@ export default function AlistoApp() {
               <View style={styles.cameraPermissionPanel}>
                 <Text style={styles.cameraPermissionTitle}>Falta permiso de cámara</Text>
                 <Text style={styles.cameraPermissionText}>
-                  Activa la cámara para tomar una foto y guardarla en este pendiente.
+                  Activa la cámara para tomar una foto y guardarla en esta tarea.
                 </Text>
               </View>
             )}
@@ -1162,7 +1182,7 @@ export default function AlistoApp() {
         </View>
         <View>
           <Text style={styles.logoName}>Alisto</Text>
-          <Text style={styles.logoTagline}>Pendientes en orden</Text>
+          <Text style={styles.logoTagline}>Tareas en orden</Text>
         </View>
       </View>
     );
@@ -1203,10 +1223,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#EEF3EF',
   },
+  scrollView: {
+    flex: 1,
+  },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 22,
+    paddingHorizontal: 22,
+    paddingVertical: 34,
   },
   cornerPiece: {
     position: 'absolute',
