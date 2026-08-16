@@ -1,6 +1,6 @@
 # Alisto
 
-Alisto es una app Expo / React Native con TypeScript para gestionar pendientes privados por usuario. La pantalla principal permite crear cuenta, iniciar sesión, revisar un resumen del día y administrar tareas con foto y ubicación opcionales.
+Alisto es una app Expo / React Native con TypeScript para gestionar pendientes privados por usuario. Permite crear cuenta local, iniciar sesión, revisar un resumen del día y administrar tareas con foto, GPS, sincronización MockAPI e importación controlada desde JSONPlaceholder.
 
 ## Objetivos
 
@@ -8,8 +8,10 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 - Iniciar y restaurar sesión en el dispositivo.
 - Mantener pendientes separados por usuario.
 - Crear, completar, renombrar y eliminar pendientes.
-- Añadir foto a un pendiente mediante cámara.
-- Añadir coordenadas a un pendiente mediante ubicación del dispositivo.
+- Adjuntar foto a un pendiente con cámara.
+- Adjuntar coordenadas GPS con fallback a última ubicación conocida.
+- Sincronizar manualmente pendientes con MockAPI sin romper modo offline.
+- Importar hasta 5 tareas desde JSONPlaceholder evitando duplicados.
 - Mantener mensajes de validación claros, en español y con estados de error/éxito visibles.
 
 ## Estructura de carpetas
@@ -30,30 +32,52 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 │   └── theme.ts                 # Tokens base de color de la plantilla
 ├── hooks/                       # Hooks starter de tema
 ├── lib/
-│   ├── alisto-db.ts             # Persistencia local, sesión, cuentas y pendientes
+│   ├── alisto-db.ts             # SQLite/localStorage, sesión, cuentas, pendientes y sync
 │   ├── remote-todo-api.ts       # Cliente HTTP de MockAPI y JSONPlaceholder
+│   ├── todo-camera.ts           # Captura y persistencia de foto por pendiente
+│   ├── todo-location.ts         # GPS actual, fallback last-known y mensajes de error
 │   └── validation-schemas.ts    # Validaciones de login, registro y pendientes
+├── __tests__/
+│   ├── alisto-sync-test.ts      # Sync MockAPI, JSONPlaceholder y deduplicación
+│   ├── remote-todo-api-test.ts  # Cliente API, errores HTTP/red/timeout/datos
+│   ├── todo-camera-test.ts      # Cámara y persistencia de foto
+│   └── todo-location-test.ts    # GPS válido, fallback y error
 ├── scripts/
 │   └── reset-project.js         # Script starter para reiniciar la plantilla
+├── .env.example                 # Plantilla versionable de configuración remota
 ├── app.json                     # Configuración Expo, permisos y plugins
-├── package.json                 # Scripts, dependencias y metadatos
+├── package.json                 # Scripts, dependencias, Jest y metadatos
 ├── bun.lock                     # Lockfile autoritativo de Bun
-├── tsconfig.json                # Configuración TypeScript basada en Expo
+├── tsconfig.json                # TypeScript estricto + tipos Jest
 └── AGENTS.md                    # Reglas para agentes que trabajen en este repo
 ```
+
+## Tecnologías utilizadas
+
+- **React Native + Expo SDK 54**: base de la aplicación, elegida por ser la tecnología trabajada en clases y facilitar el desarrollo y prueba en Android.
+- **TypeScript**: permite detectar errores mediante tipado estático y mantener un código más seguro.
+- **Expo Camera y Expo Location**: utilizados para integrar cámara, permisos y geolocalización GPS.
+- **Expo SQLite**: permite almacenar usuarios y tareas localmente, manteniendo la aplicación funcional sin conexión.
+- **MockAPI**: utilizado para almacenar y sincronizar tareas de forma remota mediante una API REST.
+- **JSONPlaceholder**: utilizado como API externa para importar tareas.
+- **Jest + jest-expo**: utilizados para las pruebas automatizadas de cámara, ubicación y APIs.
+- **Bun**: utilizado para gestionar dependencias y ejecutar los comandos del proyecto.
 
 ## Decisiones técnicas
 
 - **Expo SDK 54 + Expo Router**: conserva compatibilidad con Expo Go y estructura de rutas generada por Expo.
-- **React Native + TypeScript**: mantiene tipos explícitos para sesión, pendientes y validaciones.
+- **React Native + TypeScript**: mantiene tipos explícitos para sesión, pendientes, sync y validaciones.
 - **Bun**: `bun.lock` es el lockfile autoritativo; usar `bun install` y `bun run <script>`.
-- **Persistencia local**: `expo-sqlite` guarda datos en Android/iOS; web usa `localStorage` como fallback.
+- **SQLite local**: `expo-sqlite` guarda usuarios, sesión, pendientes y `todo_sync` en Android/iOS.
+- **Fallback web**: `localStorage` replica usuarios, sesión, pendientes y registros de sync en web.
 - **Cuentas locales**: la contraseña se guarda como hash con salt; no se guarda texto plano.
 - **Separación por usuario**: los pendientes se consultan y mutan por `userId`.
-- **Cámara y ubicación**: `expo-camera`, `expo-file-system` y `expo-location` permiten adjuntar foto y coordenadas a cada pendiente.
-- **UI en una ruta**: `app/(tabs)/index.tsx` contiene autenticación, resumen y tablero; la tab bar permanece oculta.
-- **API remota configurable**: `lib/remote-todo-api.ts` lee `process.env.EXPO_PUBLIC_REMOTE_TODOS_URL`; la URL real vive en `.env`.
-- **Modo offline primero**: las mutaciones locales no dependen de red; la sincronización con MockAPI es una acción explícita.
+- **Cámara**: `expo-camera` captura foto; `expo-file-system` persiste archivo nativo; web/data URI se conserva sin copiar.
+- **GPS**: `expo-location` usa ubicación actual; si falla, intenta última ubicación conocida antes de mostrar error.
+- **MockAPI**: `lib/remote-todo-api.ts` lee `process.env.EXPO_PUBLIC_REMOTE_TODOS_URL`; no hay URL hardcodeada en código.
+- **JSONPlaceholder**: importa desde `/todos`, limita a 5 elementos y deduplica por `jsonplaceholder:<id>`.
+- **Modo offline primero**: CRUD local no depende de red; sync remota es acción manual y sus errores no bloquean la app.
+- **Tests**: Jest + `jest-expo` cubren helpers de cámara, GPS, API remota y sync.
 
 ## Funcionalidad actual
 
@@ -70,8 +94,16 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
    - foto tomada con cámara;
    - coordenadas obtenidas del dispositivo.
 7. Cierre de sesión sin borrar pendientes.
-8. Sincronización manual con MockAPI usando la URL configurada en `.env`.
-9. Importación de tareas desde JSONPlaceholder `/todos`, con deduplicación por origen e ID externo.
+8. Sincronización manual con MockAPI:
+   - `GET` remoto después de procesar tombstones;
+   - `POST` para pendientes nuevos;
+   - `PUT` para pendientes existentes;
+   - `DELETE` para eliminados locales;
+   - una tarea eliminada no vuelve a SQLite/localStorage en el mismo sync.
+9. Importación de tareas desde JSONPlaceholder `/todos`:
+   - máximo 5 tareas;
+   - guardado en SQLite/localStorage para el usuario actual;
+   - prevención de duplicados por origen e ID externo.
 
 ## Contratos de validación
 
@@ -82,6 +114,40 @@ Alisto es una app Expo / React Native con TypeScript para gestionar pendientes p
 - Los errores se muestran en rojo.
 - Los mensajes de éxito se muestran en verde.
 - La visibilidad de contraseña se controla solo con el icono personalizado.
+
+## Configuración remota
+
+- `.env.example` es versionable y contiene:
+
+```bash
+EXPO_PUBLIC_REMOTE_TODOS_URL=<https://6a81d635400f94b23c6fac54.mockapi.io/api/v1/todos>
+```
+
+- `.env` es local y está ignorado por Git.
+- El código solo debe leer `process.env.EXPO_PUBLIC_REMOTE_TODOS_URL`.
+- La URL de MockAPI no debe hardcodearse en código fuente.
+
+## Pruebas automatizadas
+
+El proyecto tiene 13 tests en 4 suites:
+
+- Cámara:
+  - captura válida;
+  - captura sin URI/error;
+  - persistencia de foto.
+- GPS:
+  - ubicación válida;
+  - fallback a última ubicación conocida;
+  - error cuando no hay ubicación.
+- API:
+  - importación limitada a 5;
+  - prevención de duplicados;
+  - sincronización `POST`/`PUT`/`DELETE`;
+  - error HTTP;
+  - timeout/offline;
+  - tarea eliminada no reinsertada.
+
+Los tests mockean `expo-camera`, `expo-location`, `expo-file-system`, `expo-crypto`, `expo-sqlite`, `fetch` y `localStorage`; no dependen de Internet ni emulador.
 
 ## Instrucciones de ejecución
 
@@ -99,13 +165,13 @@ bun install
 
 ### Configurar API remota
 
-Crear `.env` en la raíz:
+Copiar `.env.example` a `.env` y quitar los signos `< >` si se usa la URL real:
 
 ```bash
-EXPO_PUBLIC_REMOTE_TODOS_URL=<URL de MockAPI>
+EXPO_PUBLIC_REMOTE_TODOS_URL=https://6a81d635400f94b23c6fac54.mockapi.io/api/v1/todos
 ```
 
-`.env` queda ignorado por Git; no hardcodear la URL remota en código.
+`.env` queda ignorado por Git; `.env.example` sí debe versionarse.
 
 ### Correr la app
 
@@ -128,26 +194,27 @@ bun run ios
 bun run web
 ```
 
-### Lint
+### Tests, TypeScript y lint
 
 ```bash
+bun run test:ci
+bun run tsc --noEmit
 bun run lint
+npx expo-doctor
 ```
 
-## Verificación recomendada
+## Verificación requerida
 
-1. Ejecutar `bunx tsc --noEmit`.
-2. Ejecutar `bun run lint`.
-3. Ejecutar `bunx expo-doctor`.
-4. Iniciar Expo Web con `bun run web`.
-5. Crear una cuenta local.
-6. Iniciar sesión.
-7. Crear, completar, editar y eliminar un pendiente.
-8. Sincronizar con MockAPI desde el panel `Integración API`.
-9. Importar JSONPlaceholder dos veces y confirmar que la segunda importación marca duplicados.
-10. Probar foto y ubicación cuando el entorno tenga permisos disponibles.
-11. Cerrar sesión y confirmar que los pendientes persisten al volver a entrar con la misma cuenta.
-12. Detener el servidor antes de terminar.
+Usar estos comandos antes de entregar cambios:
+
+```bash
+bun run test:ci
+bun run tsc --noEmit
+bun run lint
+npx expo-doctor
+```
+
+Para cambios UI, además iniciar Expo Web o Expo Go, recorrer login/registro/tablero/sync/importación y detener el servidor al terminar.
 
 ## Nota sobre Expo Go
 

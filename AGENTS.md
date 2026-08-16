@@ -10,8 +10,11 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - Stack: Expo SDK 54, React Native 0.81, React 19, TypeScript, Expo Router.
 - Package manager: Bun. Use `bun install`, `bun run <script>`, and keep `bun.lock` authoritative.
 - Runtime target: Expo Go compatibility by default.
-- Primary screen: `app/(tabs)/index.tsx` contains login, registration, welcome summary, and the todo board.
+- Primary screen: `app/(tabs)/index.tsx` contains login, registration, welcome summary, todo board, MockAPI sync, and JSONPlaceholder import actions.
 - Local persistence lives in `lib/alisto-db.ts`: SQLite on native platforms and `localStorage` fallback on web.
+- Sync metadata lives in `todo_sync`/`syncRecords`; it tracks remote IDs, imports, and tombstones.
+- Remote API code lives in `lib/remote-todo-api.ts`.
+- Camera helpers live in `lib/todo-camera.ts`; GPS helpers live in `lib/todo-location.ts`.
 - Validation rules live in `lib/validation-schemas.ts`.
 - Visual direction: calm productivity board, warm cream base, deep green ink, rounded cards, and clear Spanish copy.
 
@@ -45,14 +48,27 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 - Passwords must never be stored as plaintext.
 - A logged-in user sees only their own todos.
 - Todos support create, complete/uncomplete, rename, delete, optional photo, and optional location.
+- Camera uses `expo-camera`; native photo persistence uses `expo-file-system`; web/data URIs stay local.
+- GPS uses `expo-location`; current location failure falls back to last-known location before error.
 - Logging out must not delete saved todos.
 - Remote todo sync reads only `process.env.EXPO_PUBLIC_REMOTE_TODOS_URL`; never hardcode the MockAPI URL in source.
 - `.env` must stay gitignored.
+- `.env.example` must stay versionable and document `EXPO_PUBLIC_REMOTE_TODOS_URL`.
 - Remote API failures must not break local todo CRUD or login.
-- JSONPlaceholder imports must avoid duplicates for the current user.
+- MockAPI sync must process pending deletions before remote pull, so deleted todos cannot be reinserted.
+- JSONPlaceholder imports must avoid duplicates for the current user and import at most 5 todos.
+- Passwords, API URLs, and generated local IDs must not be logged except explicit non-secret diagnostics.
 
-## Verification
+## Testing contract
 
-- Run `bun run lint` after permanent code changes.
+- Jest uses `jest-expo`.
+- Current automated suite: 13 tests across camera, GPS, API client, JSONPlaceholder import, and MockAPI sync.
+- Tests must not depend on Internet, Expo Go, native emulator, or real device permissions.
+- Mock `expo-camera`, `expo-location`, `expo-file-system`, `expo-crypto`, `expo-sqlite`, `fetch`, and `localStorage` where needed.
+- Required verification after documentation or code changes:
+  - `bun run test:ci`
+  - `bun run tsc --noEmit`
+  - `bun run lint`
+  - `npx expo-doctor`
 - For UI changes, smoke test the changed path in Expo Web or Expo Go when available.
 - Stop any dev server started for verification before yielding.
