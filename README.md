@@ -105,6 +105,39 @@ Alisto es una app Expo / React Native con TypeScript para gestionar tareas priva
    - guardado en SQLite/localStorage para el usuario actual;
    - prevención de duplicados por origen e ID externo.
 
+
+## Verificaciones de funcionalidades
+
+1. **Login y registro de Alisto**: la aplicación gestora de tareas permite crear una cuenta desde el acceso inicial. Esta pantalla valida correo, contraseña y campos obligatorios antes de continuar.
+
+   ![Login y registro con validaciones](img/001.jpg)
+
+2. **Cuenta creada e inicio de sesión**: después de crear la cuenta, la app confirma el registro y vuelve al inicio de sesión. El login mantiene sus validaciones de correo, contraseña y falta de información.
+
+   ![Confirmación de cuenta e inicio de sesión](img/002.jpg)
+
+3. **Bienvenida y resumen del día**: al ingresar, se muestra una vista de bienvenida con el nombre del usuario, el resumen de tareas pendientes y completadas, y las listas separadas por estado. Desde esta vista se puede entrar al tablero para revisar detalles o crear tareas.
+
+   ![Bienvenida con resumen de tareas](img/003.jpg)
+
+4. **Tablero de tareas**: al crear o ver tareas, la lista se muestra hacia abajo. Cada tarea habilita acciones para completar, añadir foto, añadir ubicación, editar y eliminar.
+
+   ![Tablero con acciones por tarea](img/004.jpg)
+
+5. **Permisos de foto y ubicación**: para añadir foto o ubicación, la app solicita primero los permisos correspondientes al usuario.
+
+   ![Permiso para añadir ubicación](img/005.jpg)
+
+   ![Permiso para añadir foto](img/006.jpg)
+
+   ![Permiso adicional de ubicación o cámara](img/009.jpg)
+
+6. **Sincronización con la web y móvil**: la aplicación está sincronizada con la web y permite traer tareas desde la API remota. Las capturas muestran la app en celular con la integración funcionando.
+
+   ![Aplicación móvil sincronizada con la web](img/007.jpg)
+
+   ![Tareas traídas desde la web en móvil](img/008.jpg)
+
 ## Contratos de validación
 
 - El correo es requerido y debe tener formato básico válido.
