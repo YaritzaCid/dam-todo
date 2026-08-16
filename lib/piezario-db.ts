@@ -18,6 +18,8 @@ export type TodoItem = {
   completed: boolean;
   createdAt: string;
   photoUri: string | null;
+  locationLatitude: number | null;
+  locationLongitude: number | null;
   updatedAt: string;
 };
 
@@ -36,6 +38,8 @@ type TodoRow = {
   created_at: string;
   updated_at: string;
   photo_uri: string | null;
+  location_latitude: number | null;
+  location_longitude: number | null;
 };
 
 type AuthResult =
@@ -77,22 +81,31 @@ CREATE TABLE IF NOT EXISTS todos (
   user_id TEXT NOT NULL,
   title TEXT NOT NULL,
   completed INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0, 1)),
+  photo_uri TEXT,
+  location_latitude REAL,
+  location_longitude REAL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS todos_user_updated_idx ON todos(user_id, updated_at DESC);
 `);
-  await ensureTodoPhotoColumn(db);
-
-
+  await ensureTodoOptionalColumns(db);
   return db;
 }
-async function ensureTodoPhotoColumn(db: SQLiteDatabase) {
-  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(todos)');
 
-  if (!columns.some((column) => column.name === 'photo_uri')) {
-    await db.execAsync('ALTER TABLE todos ADD COLUMN photo_uri TEXT;');
+async function ensureTodoOptionalColumns(db: SQLiteDatabase) {
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(todos)');
+  const columnTypesByName: Record<string, string> = {
+    photo_uri: 'TEXT',
+    location_latitude: 'REAL',
+    location_longitude: 'REAL',
+  };
+
+  for (const [columnName, columnType] of Object.entries(columnTypesByName)) {
+    if (!columns.some((column) => column.name === columnName)) {
+      await db.execAsync(`ALTER TABLE todos ADD COLUMN ${columnName} ${columnType};`);
+    }
   }
 }
 
@@ -187,7 +200,7 @@ export async function clearSession() {
 export async function listTodos(userId: string): Promise<TodoItem[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<TodoRow>(
-    'SELECT id, user_id, title, completed, photo_uri, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY created_at DESC',
+    'SELECT id, user_id, title, completed, photo_uri, location_latitude, location_longitude, created_at, updated_at FROM todos WHERE user_id = ? ORDER BY created_at DESC',
     userId
   );
 
@@ -205,15 +218,19 @@ export async function createTodo(userId: string, title: string, photoUri: string
     createdAt: now,
     updatedAt: now,
     photoUri,
+    locationLatitude: null,
+    locationLongitude: null,
   };
 
   await db.runAsync(
-    'INSERT INTO todos (id, user_id, title, completed, photo_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO todos (id, user_id, title, completed, photo_uri, location_latitude, location_longitude, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     todo.id,
     todo.userId,
     todo.title,
     0,
     todo.photoUri,
+    todo.locationLatitude,
+    todo.locationLongitude,
     todo.createdAt,
     todo.updatedAt
   );
@@ -263,6 +280,26 @@ export async function setTodoPhoto(userId: string, todoId: string, photoUri: str
   return updatedAt;
 }
 
+export async function setTodoLocation(
+  userId: string,
+  todoId: string,
+  latitude: number,
+  longitude: number
+) {
+  const db = await getDatabase();
+  const updatedAt = new Date().toISOString();
+  await db.runAsync(
+    'UPDATE todos SET location_latitude = ?, location_longitude = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+    latitude,
+    longitude,
+    updatedAt,
+    todoId,
+    userId
+  );
+
+  return updatedAt;
+}
+
 export async function deleteTodo(userId: string, todoId: string) {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM todos WHERE id = ? AND user_id = ?', todoId, userId);
@@ -284,5 +321,7 @@ function toTodoItem(row: TodoRow): TodoItem {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     photoUri: row.photo_uri,
+    locationLatitude: row.location_latitude,
+    locationLongitude: row.location_longitude,
   };
 }

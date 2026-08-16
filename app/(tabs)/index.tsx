@@ -1,6 +1,7 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Directory, File, Paths } from 'expo-file-system';
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
+import * as Location from 'expo-location';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,6 +29,7 @@ import {
   renameTodo,
   setTodoCompleted,
   setTodoPhoto,
+  setTodoLocation,
   type TodoItem,
   type UserSession,
 } from '@/lib/piezario-db';
@@ -38,6 +40,63 @@ type Feedback = { tone: 'error' | 'success'; message: string };
 const WEB_PASSWORD_HIDDEN_STYLE =
   Platform.OS === 'web' ? ({ WebkitTextSecurity: 'disc' } as unknown as TextStyle) : undefined;
 const TODO_PHOTO_DIRECTORY = 'todo-photos';
+const LOCATION_REQUEST_TIMEOUT_MS = 12_000;
+const LOCATION_LAST_KNOWN_MAX_AGE_MS = 10 * 60 * 1000;
+const LOCATION_LAST_KNOWN_REQUIRED_ACCURACY_METERS = 5000;
+const LOCATION_FAILURE_MESSAGE = 'No pudimos obtener la ubicación.';
+const ANDROID_EMULATOR_LOCATION_FAILURE_MESSAGE =
+  'No pudimos obtener la ubicación. En el emulador, activa Ubicación, fija una coordenada GPS ' +
+  'y desactiva Google Location Accuracy si sigue fallando.';
+
+type TodoLocationFix = {
+  location: Location.LocationObject;
+  source: 'current' | 'last-known';
+};
+
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Location request timed out'));
+    }, timeoutMs);
+
+    operation.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
+async function getTodoLocationFix(): Promise<TodoLocationFix> {
+  try {
+    const location = await withTimeout(
+      Location.getCurrentPositionAsync({
+        accuracy: Platform.OS === 'android' ? Location.Accuracy.High : Location.Accuracy.Balanced,
+      }),
+      LOCATION_REQUEST_TIMEOUT_MS
+    );
+
+    return { location, source: 'current' };
+  } catch (error) {
+    const lastKnownLocation = await Location.getLastKnownPositionAsync({
+      maxAge: LOCATION_LAST_KNOWN_MAX_AGE_MS,
+      requiredAccuracy: LOCATION_LAST_KNOWN_REQUIRED_ACCURACY_METERS,
+    });
+
+    if (lastKnownLocation) {
+      return { location: lastKnownLocation, source: 'last-known' };
+    }
+
+    throw error;
+  }
+}
+
+
 
 async function persistTodoPhotoUri(photoUri: string, todoId: string) {
   if (Platform.OS === 'web' || photoUri.startsWith('data:')) {
@@ -75,6 +134,7 @@ export default function PiezarioTodoApp() {
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isTakingPhoto, setIsTakingPhoto] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isLocatingTodoId, setIsLocatingTodoId] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -314,6 +374,59 @@ export default function PiezarioTodoApp() {
       setFeedback({ tone: 'error', message: 'No pudimos eliminar la tarea.' });
     } finally {
       setIsBusy(false);
+    }
+  };
+
+  const handleSetTodoLocation = async (todo: TodoItem) => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    setIsLocatingTodoId(todo.id);
+
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+
+      if (permission.status !== 'granted') {
+        setFeedback({ tone: 'error', message: 'Activa la ubicación para añadir coordenadas a la pieza.' });
+        return;
+      }
+
+      const hasLocationServices = await Location.hasServicesEnabledAsync();
+
+      if (!hasLocationServices) {
+        setFeedback({ tone: 'error', message: 'Activa la ubicación del dispositivo para añadir coordenadas.' });
+        return;
+      }
+
+      const { location: currentLocation, source } = await getTodoLocationFix();
+      const { latitude, longitude } = currentLocation.coords;
+      const updatedAt = await setTodoLocation(session.id, todo.id, latitude, longitude);
+
+      setTodos((currentTodos) =>
+        currentTodos.map((currentTodo) =>
+          currentTodo.id === todo.id
+            ? { ...currentTodo, locationLatitude: latitude, locationLongitude: longitude, updatedAt }
+            : currentTodo
+        )
+      );
+      setFeedback({
+        tone: 'success',
+        message:
+          source === 'last-known'
+            ? 'Últimas coordenadas disponibles encajadas en la pieza.'
+            : 'Coordenadas encajadas en la pieza.',
+      });
+    } catch {
+      setFeedback({
+        tone: 'error',
+        message:
+          Platform.OS === 'android' ? ANDROID_EMULATOR_LOCATION_FAILURE_MESSAGE : LOCATION_FAILURE_MESSAGE,
+      });
+    } finally {
+      setIsBusy(false);
+      setIsLocatingTodoId(null);
     }
   };
 
@@ -647,6 +760,11 @@ export default function PiezarioTodoApp() {
             <Text style={[styles.todoTitle, todo.completed && styles.todoTitleCompleted]}>{todo.title}</Text>
           )}
           <Text style={styles.todoMeta}>{todo.completed ? 'Completada' : 'Pendiente'}</Text>
+          {todo.locationLatitude !== null && todo.locationLongitude !== null ? (
+            <Text style={styles.todoCoordinates}>
+              Latitud {todo.locationLatitude.toFixed(6)} · Longitud {todo.locationLongitude.toFixed(6)}
+            </Text>
+          ) : null}
           {todo.photoUri ? (
             <Image
               accessibilityLabel={`Foto de ${todo.title}`}
@@ -683,6 +801,20 @@ export default function PiezarioTodoApp() {
                 onPress={() => openCameraForTodo(todo)}
                 style={({ pressed }) => [styles.photoActionButton, pressed && styles.actionButtonPressed]}>
                 <Text style={styles.photoActionText}>{todo.photoUri ? 'Cambiar foto' : 'Añadir foto'}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel={`${todo.locationLatitude !== null ? 'Actualizar ubicación' : 'Añadir ubicación'} ${todo.title}`}
+                accessibilityRole="button"
+                disabled={isBusy}
+                onPress={() => handleSetTodoLocation(todo)}
+                style={({ pressed }) => [styles.locationActionButton, pressed && styles.actionButtonPressed]}>
+                <Text style={styles.locationActionText}>
+                  {isLocatingTodoId === todo.id
+                    ? 'Ubicando...'
+                    : todo.locationLatitude !== null
+                      ? 'Actualizar ubicación'
+                      : 'Añadir ubicación'}
+                </Text>
               </Pressable>
               <Pressable
                 accessibilityLabel={`Editar ${todo.title}`}
@@ -1240,6 +1372,17 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase',
   },
+  todoCoordinates: {
+    alignSelf: 'flex-start',
+    marginTop: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    color: '#3E2A46',
+    backgroundColor: '#E4F6F2',
+    fontSize: 12,
+    fontWeight: '900',
+  },
   todoPhoto: {
     width: '100%',
     height: 180,
@@ -1280,6 +1423,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#2DB7A3',
   },
   photoActionText: {
+    color: '#FFF9EC',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  locationActionButton: {
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#5B4265',
+  },
+  locationActionText: {
     color: '#FFF9EC',
     fontSize: 13,
     fontWeight: '900',

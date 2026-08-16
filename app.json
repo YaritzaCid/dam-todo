@@ -35,6 +35,13 @@
         }
       ],
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Permite que Piezario use tu ubicación para añadir coordenadas a tus piezas.",
+          "locationAlwaysAndWhenInUsePermission": "Permite que Piezario use tu ubicación para añadir coordenadas a tus piezas."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
