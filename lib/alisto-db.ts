@@ -365,6 +365,22 @@ CREATE TABLE IF NOT EXISTS todo_sync (
 CREATE INDEX IF NOT EXISTS todos_user_updated_idx ON todos(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS todo_sync_user_idx ON todo_sync(user_id, remote_id, import_source, import_external_id);
 `);
+  await removeExcessJsonPlaceholderImports(db);
+}
+
+async function removeExcessJsonPlaceholderImports(db: SQLiteDatabase) {
+  await db.execAsync(`
+DELETE FROM todos
+WHERE id IN (
+  SELECT local_id
+  FROM todo_sync
+  WHERE import_source = 'jsonplaceholder'
+    AND CAST(import_external_id AS INTEGER) > 5
+);
+DELETE FROM todo_sync
+WHERE import_source = 'jsonplaceholder'
+  AND CAST(import_external_id AS INTEGER) > 5;
+`);
 }
 
 async function ensureUserOptionalColumns(db: SQLiteDatabase) {

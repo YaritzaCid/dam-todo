@@ -1,6 +1,7 @@
 import type { TodoItem } from './alisto-db';
 
 const JSONPLACEHOLDER_TODOS_URL = 'https://jsonplaceholder.typicode.com/todos';
+const JSONPLACEHOLDER_IMPORT_LIMIT = 5;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export type RemoteTodoRecord = {
@@ -161,17 +162,19 @@ export async function fetchJsonPlaceholderTodos() {
     return [];
   }
 
-  return rawTodos.filter((todo): todo is JsonPlaceholderTodo => {
-    if (!todo || typeof todo !== 'object') {
-      return false;
-    }
+  return rawTodos
+    .filter((todo): todo is JsonPlaceholderTodo => {
+      if (!todo || typeof todo !== 'object') {
+        return false;
+      }
 
-    const candidate = todo as Partial<JsonPlaceholderTodo>;
-    return (
-      typeof candidate.id === 'number' &&
-      typeof candidate.userId === 'number' &&
-      typeof candidate.title === 'string' &&
-      typeof candidate.completed === 'boolean'
-    );
-  });
+      const candidate = todo as Partial<JsonPlaceholderTodo>;
+      return (
+        typeof candidate.id === 'number' &&
+        typeof candidate.userId === 'number' &&
+        typeof candidate.title === 'string' &&
+        typeof candidate.completed === 'boolean'
+      );
+    })
+    .slice(0, JSONPLACEHOLDER_IMPORT_LIMIT);
 }
