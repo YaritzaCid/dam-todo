@@ -1,5 +1,4 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { Directory, File, Paths } from 'expo-file-system';
 import { CameraView, useCameraPermissions, type CameraType } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useEffect, useRef, useState } from 'react';
@@ -35,6 +34,12 @@ import {
   type TodoItem,
   type UserSession,
 } from '@/lib/alisto-db';
+import { captureTodoPhoto } from '@/lib/todo-camera';
+import {
+  ANDROID_EMULATOR_LOCATION_FAILURE_MESSAGE,
+  getTodoLocationFix,
+  LOCATION_FAILURE_MESSAGE,
+} from '@/lib/todo-location';
 import { getRemoteTodoApiUserMessage } from '@/lib/remote-todo-api';
 import { loginSchema, registrationSchema, todoTitleSchema } from '@/lib/validation-schemas';
 
@@ -43,79 +48,6 @@ type ActiveView = 'welcome' | 'todos';
 type Feedback = { tone: 'error' | 'success'; message: string };
 const WEB_PASSWORD_HIDDEN_STYLE =
   Platform.OS === 'web' ? ({ WebkitTextSecurity: 'disc' } as unknown as TextStyle) : undefined;
-const TODO_PHOTO_DIRECTORY = 'todo-photos';
-const LOCATION_REQUEST_TIMEOUT_MS = 12_000;
-const LOCATION_LAST_KNOWN_MAX_AGE_MS = 10 * 60 * 1000;
-const LOCATION_LAST_KNOWN_REQUIRED_ACCURACY_METERS = 5000;
-const LOCATION_FAILURE_MESSAGE = 'No pudimos obtener la ubicación.';
-const ANDROID_EMULATOR_LOCATION_FAILURE_MESSAGE =
-  'No pudimos obtener la ubicación. En el emulador, activa Ubicación, fija una coordenada GPS ' +
-  'y desactiva Google Location Accuracy si sigue fallando.';
-
-type TodoLocationFix = {
-  location: Location.LocationObject;
-  source: 'current' | 'last-known';
-};
-
-function withTimeout<T>(operation: Promise<T>, timeoutMs: number) {
-  return new Promise<T>((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(new Error('Location request timed out'));
-    }, timeoutMs);
-
-    operation.then(
-      (value) => {
-        clearTimeout(timeoutId);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timeoutId);
-        reject(error);
-      }
-    );
-  });
-}
-
-async function getTodoLocationFix(): Promise<TodoLocationFix> {
-  try {
-    const location = await withTimeout(
-      Location.getCurrentPositionAsync({
-        accuracy: Platform.OS === 'android' ? Location.Accuracy.High : Location.Accuracy.Balanced,
-      }),
-      LOCATION_REQUEST_TIMEOUT_MS
-    );
-
-    return { location, source: 'current' };
-  } catch (error) {
-    const lastKnownLocation = await Location.getLastKnownPositionAsync({
-      maxAge: LOCATION_LAST_KNOWN_MAX_AGE_MS,
-      requiredAccuracy: LOCATION_LAST_KNOWN_REQUIRED_ACCURACY_METERS,
-    });
-
-    if (lastKnownLocation) {
-      return { location: lastKnownLocation, source: 'last-known' };
-    }
-
-    throw error;
-  }
-}
-
-
-
-async function persistTodoPhotoUri(photoUri: string, todoId: string) {
-  if (Platform.OS === 'web' || photoUri.startsWith('data:')) {
-    return photoUri;
-  }
-
-  const directory = new Directory(Paths.document, TODO_PHOTO_DIRECTORY);
-  directory.create({ idempotent: true, intermediates: true });
-
-  const source = new File(photoUri);
-  const destination = new File(directory, `${todoId}-${Date.now()}.jpg`);
-  source.copy(destination);
-
-  return destination.uri;
-}
 
 export default function AlistoApp() {
   const [authMode, setAuthMode] = useState<AuthMode>('login');
@@ -517,16 +449,7 @@ export default function AlistoApp() {
     setIsTakingPhoto(true);
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.82,
-        skipProcessing: false,
-      });
-
-      if (!photo?.uri) {
-        throw new Error('Camera returned no photo URI.');
-      }
-
-      const storedPhotoUri = await persistTodoPhotoUri(photo.uri, cameraTodoId);
+      const storedPhotoUri = await captureTodoPhoto(cameraRef.current, cameraTodoId);
       const updatedAt = await setTodoPhoto(session.id, cameraTodoId, storedPhotoUri);
       setTodos((currentTodos) =>
         currentTodos.map((currentTodo) =>
