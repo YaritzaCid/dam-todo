@@ -8,7 +8,7 @@ export default function TabLayout() {
         headerShown: false,
         tabBarStyle: { display: 'none' },
       }}>
-      <Tabs.Screen name="index" options={{ title: 'Piezario' }} />
+      <Tabs.Screen name="index" options={{ title: 'Alisto' }} />
       <Tabs.Screen name="explore" options={{ href: null }} />
     </Tabs>
   );

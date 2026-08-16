@@ -5,6 +5,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 const emailField = z.string().trim().transform((email) => email.toLowerCase());
+const nameField = z.string().trim();
 const passwordField = z.string();
 
 export const loginSchema = z
@@ -16,12 +17,12 @@ export const loginSchema = z
     const addLoginIssue = (message: string) => ctx.addIssue({ code: 'custom', message });
 
     if (!email && !password) {
-      addLoginIssue('Faltan piezas: introduce correo y contraseña.');
+      addLoginIssue('Introduce correo y contraseña.');
       return;
     }
 
     if (!email) {
-      addLoginIssue('Faltan piezas: introduce correo.');
+      addLoginIssue('Introduce correo.');
       return;
     }
 
@@ -36,31 +37,36 @@ export const loginSchema = z
     }
 
     if (!EMAIL_PATTERN.test(email)) {
-      addLoginIssue('La pieza de correo no encaja: usa un correo válido.');
+      addLoginIssue('Usa un correo válido.');
     }
   });
 
 export const registrationSchema = z
   .object({
+    name: nameField,
     email: emailField,
     password: passwordField,
     confirmPassword: passwordField,
   })
-  .superRefine(({ email, password, confirmPassword }, ctx) => {
+  .superRefine(({ name, email, password, confirmPassword }, ctx) => {
     const addRegistrationIssue = (message: string) => ctx.addIssue({ code: 'custom', message });
 
+    if (!name) {
+      addRegistrationIssue('Introduce tu nombre para crear tu cuenta.');
+      return;
+    }
     if (!email) {
-      addRegistrationIssue('Falta la pieza de correo para crear tu cuenta.');
+      addRegistrationIssue('Introduce correo para crear tu cuenta.');
       return;
     }
 
     if (!EMAIL_PATTERN.test(email)) {
-      addRegistrationIssue('La pieza de correo no encaja: usa un correo válido.');
+      addRegistrationIssue('Usa un correo válido.');
       return;
     }
 
     if (!password) {
-      addRegistrationIssue('Faltan piezas: introduce contraseña');
+      addRegistrationIssue('Introduce contraseña.');
       return;
     }
 
@@ -75,14 +81,14 @@ export const registrationSchema = z
     }
 
     if (password !== confirmPassword) {
-      addRegistrationIssue('Las contraseñas no encajan. Revísalas.');
+      addRegistrationIssue('Las contraseñas no coinciden. Revísalas.');
     }
   });
 
 export const todoTitleSchema = z
   .string()
   .trim()
-  .min(1, { message: 'Escribe una tarea antes de añadir la pieza.' });
+  .min(1, { message: 'Escribe un pendiente antes de añadirlo.' });
 
 export type LoginInput = z.input<typeof loginSchema>;
 export type LoginData = z.output<typeof loginSchema>;

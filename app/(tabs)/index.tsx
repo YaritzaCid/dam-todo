@@ -32,10 +32,11 @@ import {
   setTodoLocation,
   type TodoItem,
   type UserSession,
-} from '@/lib/piezario-db';
+} from '@/lib/alisto-db';
 import { loginSchema, registrationSchema, todoTitleSchema } from '@/lib/validation-schemas';
 
 type AuthMode = 'login' | 'register';
+type ActiveView = 'welcome' | 'todos';
 type Feedback = { tone: 'error' | 'success'; message: string };
 const WEB_PASSWORD_HIDDEN_STYLE =
   Platform.OS === 'web' ? ({ WebkitTextSecurity: 'disc' } as unknown as TextStyle) : undefined;
@@ -113,8 +114,10 @@ async function persistTodoPhotoUri(photoUri: string, todoId: string) {
   return destination.uri;
 }
 
-export default function PiezarioTodoApp() {
+export default function AlistoApp() {
   const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [activeView, setActiveView] = useState<ActiveView>('welcome');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -129,12 +132,14 @@ export default function PiezarioTodoApp() {
   const [isBusy, setIsBusy] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
+  const todoInputRef = useRef<TextInput>(null);
   const [cameraFacing, setCameraFacing] = useState<CameraType>('back');
   const [cameraTodoId, setCameraTodoId] = useState<string | null>(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isTakingPhoto, setIsTakingPhoto] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isLocatingTodoId, setIsLocatingTodoId] = useState<string | null>(null);
+  const [todoPendingDeletion, setTodoPendingDeletion] = useState<TodoItem | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -155,9 +160,10 @@ export default function PiezarioTodoApp() {
 
         setSession(storedSession);
         setTodos(storedTodos);
+        setActiveView('welcome');
       } catch {
         if (isMounted) {
-          setFeedback({ tone: 'error', message: 'No pudimos cargar tus piezas guardadas.' });
+          setFeedback({ tone: 'error', message: 'No pudimos cargar tus pendientes guardados.' });
         }
       } finally {
         if (isMounted) {
@@ -177,12 +183,15 @@ export default function PiezarioTodoApp() {
     const userTodos = await listTodos(nextSession.id);
 
     setSession(nextSession);
+    setActiveView('welcome');
     setTodos(userTodos);
+    setName('');
     setEmail('');
     setPassword('');
     setConfirmPassword('');
     setNewTodoTitle('');
     setEditingTodoId(null);
+    setTodoPendingDeletion(null);
     setEditingTitle('');
     setFeedback({ tone: 'success', message });
   };
@@ -191,7 +200,7 @@ export default function PiezarioTodoApp() {
     const validation = loginSchema.safeParse({ email, password });
 
     if (!validation.success) {
-      setFeedback({ tone: 'error', message: validation.error.issues[0]?.message ?? 'Las piezas no encajan.' });
+      setFeedback({ tone: 'error', message: validation.error.issues[0]?.message ?? 'Revisa tus datos para continuar.' });
       return;
     }
 
@@ -205,8 +214,9 @@ export default function PiezarioTodoApp() {
         return;
       }
 
-      await activateSession(result.session, `Pieza colocada: ${result.session.email}.`);
-    } catch {
+      await activateSession(result.session, `Sesión iniciada: ${result.session.name}.`);
+    } catch (error) {
+      console.error('Login failed', error);
       setFeedback({ tone: 'error', message: 'No pudimos iniciar sesión. Inténtalo de nuevo.' });
     } finally {
       setIsBusy(false);
@@ -214,7 +224,7 @@ export default function PiezarioTodoApp() {
   };
 
   const handleRegister = async () => {
-    const validation = registrationSchema.safeParse({ email, password, confirmPassword });
+    const validation = registrationSchema.safeParse({ name, email, password, confirmPassword });
 
     if (!validation.success) {
       setFeedback({ tone: 'error', message: validation.error.issues[0]?.message ?? 'Revisa los datos de registro.' });
@@ -224,15 +234,21 @@ export default function PiezarioTodoApp() {
     setIsBusy(true);
 
     try {
-      const result = await registerUser(validation.data.email, validation.data.password);
+      const result = await registerUser(validation.data.name, validation.data.email, validation.data.password);
 
       if (!result.ok) {
         setFeedback({ tone: 'error', message: result.message });
         return;
       }
 
-      await activateSession(result.session, `Cuenta creada: ${result.session.email}.`);
-    } catch {
+      setAuthMode('login');
+      setName('');
+      setEmail(result.account.email);
+      setPassword('');
+      setConfirmPassword('');
+      setFeedback({ tone: 'success', message: 'Cuenta creada. Inicia sesión para acceder a tu sesión.' });
+    } catch (error) {
+      console.error('Registration failed', error);
       setFeedback({ tone: 'error', message: 'No pudimos crear la cuenta. Inténtalo de nuevo.' });
     } finally {
       setIsBusy(false);
@@ -249,8 +265,10 @@ export default function PiezarioTodoApp() {
       setNewTodoTitle('');
       setEditingTodoId(null);
       setEditingTitle('');
+      setActiveView('welcome');
+      setTodoPendingDeletion(null);
       setAuthMode('login');
-      setFeedback({ tone: 'success', message: 'Sesión cerrada. Tus piezas siguen guardadas.' });
+      setFeedback({ tone: 'success', message: 'Sesión cerrada. Tus pendientes siguen guardados.' });
     } catch {
       setFeedback({ tone: 'error', message: 'No pudimos cerrar sesión.' });
     } finally {
@@ -276,9 +294,9 @@ export default function PiezarioTodoApp() {
       const todo = await createTodo(session.id, validation.data);
       setTodos((currentTodos) => [todo, ...currentTodos]);
       setNewTodoTitle('');
-      setFeedback({ tone: 'success', message: 'Pieza añadida al tablero.' });
+      setFeedback({ tone: 'success', message: 'Pendiente añadido a la lista.' });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos guardar la tarea.' });
+      setFeedback({ tone: 'error', message: 'No pudimos guardar el pendiente.' });
     } finally {
       setIsBusy(false);
     }
@@ -303,10 +321,10 @@ export default function PiezarioTodoApp() {
       );
       setFeedback({
         tone: 'success',
-        message: nextCompleted ? 'Pieza completada.' : 'Pieza marcada como pendiente.',
+        message: nextCompleted ? 'Pendiente completado.' : 'Pendiente marcado como activo.',
       });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos actualizar la tarea.' });
+      setFeedback({ tone: 'error', message: 'No pudimos actualizar el pendiente.' });
     } finally {
       setIsBusy(false);
     }
@@ -330,7 +348,7 @@ export default function PiezarioTodoApp() {
     const validation = todoTitleSchema.safeParse(editingTitle);
 
     if (!validation.success) {
-      setFeedback({ tone: 'error', message: validation.error.issues[0]?.message ?? 'La tarea no puede estar vacía.' });
+      setFeedback({ tone: 'error', message: validation.error.issues[0]?.message ?? 'El pendiente no puede estar vacío.' });
       return;
     }
 
@@ -351,15 +369,15 @@ export default function PiezarioTodoApp() {
         )
       );
       cancelEditingTodo();
-      setFeedback({ tone: 'success', message: 'Pieza renombrada.' });
+      setFeedback({ tone: 'success', message: 'Pendiente renombrado.' });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos editar la tarea.' });
+      setFeedback({ tone: 'error', message: 'No pudimos editar el pendiente.' });
     } finally {
       setIsBusy(false);
     }
   };
 
-  const handleDeleteTodo = async (todo: TodoItem) => {
+  const deleteTodoAfterConfirmation = async (todo: TodoItem) => {
     if (!session) {
       return;
     }
@@ -369,12 +387,34 @@ export default function PiezarioTodoApp() {
     try {
       await deleteTodo(session.id, todo.id);
       setTodos((currentTodos) => currentTodos.filter((currentTodo) => currentTodo.id !== todo.id));
-      setFeedback({ tone: 'success', message: 'Pieza retirada del tablero.' });
+      setFeedback({ tone: 'success', message: 'Pendiente eliminado de la lista.' });
     } catch {
-      setFeedback({ tone: 'error', message: 'No pudimos eliminar la tarea.' });
+      setFeedback({ tone: 'error', message: 'No pudimos eliminar el pendiente.' });
     } finally {
       setIsBusy(false);
     }
+  };
+
+  const handleDeleteTodo = (todo: TodoItem) => {
+    setTodoPendingDeletion(todo);
+  };
+
+  const cancelDeleteTodo = () => {
+    if (isBusy) {
+      return;
+    }
+
+    setTodoPendingDeletion(null);
+  };
+
+  const confirmDeleteTodo = () => {
+    if (!todoPendingDeletion) {
+      return;
+    }
+
+    const todo = todoPendingDeletion;
+    setTodoPendingDeletion(null);
+    void deleteTodoAfterConfirmation(todo);
   };
 
   const handleSetTodoLocation = async (todo: TodoItem) => {
@@ -389,7 +429,7 @@ export default function PiezarioTodoApp() {
       const permission = await Location.requestForegroundPermissionsAsync();
 
       if (permission.status !== 'granted') {
-        setFeedback({ tone: 'error', message: 'Activa la ubicación para añadir coordenadas a la pieza.' });
+        setFeedback({ tone: 'error', message: 'Activa la ubicación para añadir coordenadas al pendiente.' });
         return;
       }
 
@@ -415,8 +455,8 @@ export default function PiezarioTodoApp() {
         tone: 'success',
         message:
           source === 'last-known'
-            ? 'Últimas coordenadas disponibles encajadas en la pieza.'
-            : 'Coordenadas encajadas en la pieza.',
+            ? 'Últimas coordenadas disponibles guardadas en el pendiente.'
+            : 'Coordenadas guardadas en el pendiente.',
       });
     } catch {
       setFeedback({
@@ -439,7 +479,7 @@ export default function PiezarioTodoApp() {
       const nextPermission = await requestCameraPermission();
 
       if (!nextPermission.granted) {
-        setFeedback({ tone: 'error', message: 'Activa la cámara para añadir una foto a la pieza.' });
+        setFeedback({ tone: 'error', message: 'Activa la cámara para añadir una foto al pendiente.' });
         return;
       }
     }
@@ -491,7 +531,7 @@ export default function PiezarioTodoApp() {
             : currentTodo
         )
       );
-      setFeedback({ tone: 'success', message: 'Foto encajada en la pieza.' });
+      setFeedback({ tone: 'success', message: 'Foto guardada en el pendiente.' });
       setIsCameraOpen(false);
       setCameraTodoId(null);
       setIsCameraReady(false);
@@ -502,12 +542,21 @@ export default function PiezarioTodoApp() {
     }
   };
 
+
+  const startCreatingTodo = () => {
+    setActiveView('todos');
+    setFeedback(null);
+    setTimeout(() => todoInputRef.current?.focus(), 0);
+  };
+
   const switchAuthMode = (nextMode: AuthMode) => {
     setAuthMode(nextMode);
+    setName('');
     setPassword('');
     setConfirmPassword('');
     setFeedback(null);
   };
+
 
   if (isBooting) {
     return (
@@ -515,8 +564,8 @@ export default function PiezarioTodoApp() {
         <View style={styles.cornerPiece} />
         <View style={styles.floatingPiece} />
         <View style={styles.loadingPanel}>
-          <ActivityIndicator color="#5B4265" size="large" />
-          <Text style={styles.loadingText}>Preparando tu tablero de piezas...</Text>
+          <ActivityIndicator color="#275C5A" size="large" />
+          <Text style={styles.loadingText}>Preparando tu lista...</Text>
         </View>
       </View>
     );
@@ -535,9 +584,10 @@ export default function PiezarioTodoApp() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {session ? renderTodoBoard(session) : renderAuthPanel()}
+        {session ? (activeView === 'todos' ? renderTodoBoard(session) : renderWelcomePanel(session)) : renderAuthPanel()}
       </ScrollView>
       {renderCameraModal()}
+      {renderDeleteConfirmationModal()}
     </KeyboardAvoidingView>
   );
 
@@ -549,14 +599,34 @@ export default function PiezarioTodoApp() {
         {renderLogoLockup()}
 
         <View style={styles.copy}>
-          <Text style={styles.eyebrow}>Puzzle de acceso</Text>
-          <Text style={styles.title}>Coloca tus piezas para entrar.</Text>
+          <Text style={styles.eyebrow}>Acceso privado</Text>
+          <Text style={styles.title}>Ordena lo pendiente con calma.</Text>
           <Text style={styles.subtitle}>
-            Reúne correo y contraseña para abrir tu tablero personal de Piezario.
+            Alisto reúne tus tareas, fotos y ubicaciones en una lista clara para el día.
           </Text>
         </View>
 
         <View style={styles.form}>
+          {isRegisterMode ? (
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Nombre</Text>
+              <TextInput
+                accessibilityLabel="Nombre"
+                autoCapitalize="words"
+                autoComplete="name"
+                autoCorrect={false}
+                editable={!isBusy}
+                onChangeText={setName}
+                placeholder="Tu nombre"
+                placeholderTextColor="#7F8A86"
+                returnKeyType="next"
+                style={styles.input}
+                textContentType="name"
+                value={name}
+              />
+            </View>
+          ) : null}
+
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Correo</Text>
             <TextInput
@@ -565,11 +635,10 @@ export default function PiezarioTodoApp() {
               autoComplete="email"
               autoCorrect={false}
               editable={!isBusy}
-              inputMode="email"
-              keyboardType="email-address"
+              inputMode="text"
               onChangeText={setEmail}
               placeholder="nombre@correo.com"
-              placeholderTextColor="#8D7B68"
+              placeholderTextColor="#7F8A86"
               returnKeyType="next"
               style={styles.input}
               textContentType="emailAddress"
@@ -585,7 +654,7 @@ export default function PiezarioTodoApp() {
                 editable={!isBusy}
                 onChangeText={setPassword}
                 placeholder="••••••••"
-                placeholderTextColor="#8D7B68"
+                placeholderTextColor="#7F8A86"
                 returnKeyType={isRegisterMode ? 'next' : 'done'}
                 secureTextEntry={Platform.OS !== 'web' && !isPasswordVisible}
                 style={[
@@ -607,7 +676,7 @@ export default function PiezarioTodoApp() {
                 editable={!isBusy}
                 onChangeText={setConfirmPassword}
                 placeholder="••••••••"
-                placeholderTextColor="#8D7B68"
+                placeholderTextColor="#7F8A86"
                 returnKeyType="done"
                 secureTextEntry={Platform.OS !== 'web' && !isPasswordVisible}
                 style={[styles.input, !isPasswordVisible && WEB_PASSWORD_HIDDEN_STYLE]}
@@ -626,7 +695,7 @@ export default function PiezarioTodoApp() {
               pressed && styles.buttonPressed,
               isBusy && styles.disabledControl,
             ]}>
-            <Text style={styles.buttonText}>{isRegisterMode ? 'Crear cuenta' : 'Encajar piezas'}</Text>
+            <Text style={styles.buttonText}>{isRegisterMode ? 'Crear cuenta' : 'Entrar a Alisto'}</Text>
           </Pressable>
 
           <Pressable
@@ -655,17 +724,89 @@ export default function PiezarioTodoApp() {
     );
   }
 
-  function renderTodoBoard(activeSession: UserSession) {
+  function renderWelcomePanel(activeSession: UserSession) {
+    const pendingTodos = todos.filter((todo) => !todo.completed);
+    const completedTodos = todos.filter((todo) => todo.completed);
+    const totalTodos = todos.length;
+    const summaryText =
+      totalTodos === 0
+        ? 'Aún no tienes pendientes. Crea el primero para organizar tu día.'
+        : `${pendingTodos.length} pendientes y ${completedTodos.length} completadas.`;
+
     return (
-      <View style={[styles.panel, styles.boardPanel]}>
+      <View style={[styles.panel, styles.welcomePanel]}>
         {renderLogoLockup()}
 
-        <View style={styles.boardHeader}>
+        <View style={styles.welcomeHero}>
           <View style={styles.copy}>
-            <Text style={styles.eyebrow}>Tablero To-Do</Text>
-            <Text style={styles.title}>Bienvenido, {activeSession.email}</Text>
-            <Text style={styles.subtitle}>Tus piezas pendientes están guardadas en este dispositivo.</Text>
+            <Text style={styles.eyebrow}>Resumen del día</Text>
+            <Text style={styles.title}>Bienvenido, {activeSession.name}</Text>
+            <Text style={styles.subtitle}>{summaryText}</Text>
           </View>
+
+          <View style={styles.summaryMosaic} accessibilityLabel="Resumen de pendientes">
+            <View style={[styles.summaryPiece, styles.summaryPiecePending]}>
+              <Text style={styles.summaryNumber}>{pendingTodos.length}</Text>
+              <Text style={styles.summaryLabel}>Pendientes</Text>
+            </View>
+            <View style={[styles.summaryPiece, styles.summaryPieceCompleted]}>
+              <Text style={styles.summaryNumber}>{completedTodos.length}</Text>
+              <Text style={styles.summaryLabel}>Completadas</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.summaryColumns}>
+          <View style={styles.summaryColumn}>
+            <Text style={styles.summaryColumnTitle}>Pendientes por hacer</Text>
+            {pendingTodos.length === 0 ? (
+              <Text style={styles.summaryEmptyText}>No quedan pendientes activos.</Text>
+            ) : (
+              <ScrollView
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+                style={styles.summaryTaskList}
+                contentContainerStyle={styles.summaryTaskListContent}>
+                {pendingTodos.map((todo) => (
+                  <Text key={todo.id} style={styles.summaryTaskText}>• {todo.title}</Text>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+
+          <View style={styles.summaryColumn}>
+            <Text style={styles.summaryColumnTitle}>Tareas completadas</Text>
+            {completedTodos.length === 0 ? (
+              <Text style={styles.summaryEmptyText}>Completa una tarea para verla aquí.</Text>
+            ) : (
+              <ScrollView
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+                style={styles.summaryTaskList}
+                contentContainerStyle={styles.summaryTaskListContent}>
+                {completedTodos.map((todo) => (
+                  <Text key={todo.id} style={styles.summaryTaskText}>• {todo.title}</Text>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+
+        {renderFeedback()}
+
+        <View style={styles.welcomeActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isBusy }}
+            disabled={isBusy}
+            onPress={startCreatingTodo}
+            style={({ pressed }) => [
+              styles.welcomePrimaryButton,
+              pressed && styles.buttonPressed,
+              isBusy && styles.disabledControl,
+            ]}>
+            <Text style={styles.buttonText}>Ver/crear pendiente</Text>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: isBusy }}
@@ -679,16 +820,59 @@ export default function PiezarioTodoApp() {
             <Text style={styles.logoutText}>Cerrar sesión</Text>
           </Pressable>
         </View>
+      </View>
+    );
+  }
+
+  function renderTodoBoard(activeSession: UserSession) {
+    return (
+      <View style={[styles.panel, styles.boardPanel]}>
+        {renderLogoLockup()}
+
+        <View style={styles.boardHeader}>
+          <View style={styles.copy}>
+            <Text style={styles.eyebrow}>Lista de pendientes</Text>
+            <Text style={styles.title}>Hola, {activeSession.name}</Text>
+            <Text style={styles.subtitle}>Tus pendientes están guardados en este dispositivo.</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isBusy }}
+              disabled={isBusy}
+              onPress={() => setActiveView('welcome')}
+              style={({ pressed }) => [
+                styles.logoutButton,
+                pressed && styles.logoutButtonPressed,
+                isBusy && styles.disabledControl,
+              ]}>
+              <Text style={styles.logoutText}>Resumen</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: isBusy }}
+              disabled={isBusy}
+              onPress={handleLogout}
+              style={({ pressed }) => [
+                styles.logoutButton,
+                pressed && styles.logoutButtonPressed,
+                isBusy && styles.disabledControl,
+              ]}>
+              <Text style={styles.logoutText}>Cerrar sesión</Text>
+            </Pressable>
+          </View>
+        </View>
 
         <View style={styles.todoComposer}>
-          <Text style={styles.label}>Nueva pieza por encajar</Text>
+          <Text style={styles.label}>Nuevo pendiente</Text>
           <View style={styles.todoInputRow}>
             <TextInput
-              accessibilityLabel="Nueva pieza por encajar"
+              ref={todoInputRef}
+              accessibilityLabel="Nuevo pendiente"
               editable={!isBusy}
               onChangeText={setNewTodoTitle}
-              placeholder="Ej. Repasar Expo SQLite"
-              placeholderTextColor="#8D7B68"
+              placeholder="Ej. Comprar material para clase"
+              placeholderTextColor="#7F8A86"
               returnKeyType="done"
               style={[styles.input, styles.todoInput]}
               value={newTodoTitle}
@@ -703,7 +887,7 @@ export default function PiezarioTodoApp() {
                 pressed && styles.buttonPressed,
                 isBusy && styles.disabledControl,
               ]}>
-              <Text style={styles.buttonText}>Añadir pieza</Text>
+              <Text style={styles.buttonText}>Añadir pendiente</Text>
             </Pressable>
           </View>
         </View>
@@ -714,8 +898,8 @@ export default function PiezarioTodoApp() {
           {todos.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyPiece} />
-              <Text style={styles.emptyTitle}>Aún no hay piezas.</Text>
-              <Text style={styles.emptyText}>Añade la primera tarea para empezar el tablero.</Text>
+              <Text style={styles.emptyTitle}>Tu lista está en blanco.</Text>
+              <Text style={styles.emptyText}>Añade el primer pendiente para verlo aquí.</Text>
             </View>
           ) : (
             todos.map((todo) => renderTodoItem(todo))
@@ -751,8 +935,8 @@ export default function PiezarioTodoApp() {
               autoFocus
               editable={!isBusy}
               onChangeText={setEditingTitle}
-              placeholder="Nombre de la pieza"
-              placeholderTextColor="#8D7B68"
+              placeholder="Nombre del pendiente"
+              placeholderTextColor="#7F8A86"
               style={[styles.input, styles.editInput]}
               value={editingTitle}
             />
@@ -795,7 +979,7 @@ export default function PiezarioTodoApp() {
           ) : (
             <>
               <Pressable
-                accessibilityLabel={`${todo.photoUri ? 'Cambiar foto' : 'Añadir foto'} ${todo.title}`}
+                accessibilityLabel={`${todo.photoUri ? 'Cambiar foto de' : 'Añadir foto a'} ${todo.title}`}
                 accessibilityRole="button"
                 disabled={isBusy || isTakingPhoto}
                 onPress={() => openCameraForTodo(todo)}
@@ -803,7 +987,7 @@ export default function PiezarioTodoApp() {
                 <Text style={styles.photoActionText}>{todo.photoUri ? 'Cambiar foto' : 'Añadir foto'}</Text>
               </Pressable>
               <Pressable
-                accessibilityLabel={`${todo.locationLatitude !== null ? 'Actualizar ubicación' : 'Añadir ubicación'} ${todo.title}`}
+                accessibilityLabel={`${todo.locationLatitude !== null ? 'Actualizar ubicación de' : 'Añadir ubicación a'} ${todo.title}`}
                 accessibilityRole="button"
                 disabled={isBusy}
                 onPress={() => handleSetTodoLocation(todo)}
@@ -839,6 +1023,51 @@ export default function PiezarioTodoApp() {
     );
   }
 
+  function renderDeleteConfirmationModal() {
+    if (!todoPendingDeletion) {
+      return null;
+    }
+
+    return (
+      <Modal animationType="fade" onRequestClose={cancelDeleteTodo} transparent visible>
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmPanel}>
+            <Text style={styles.confirmTitle}>Eliminar pendiente</Text>
+            <Text style={styles.confirmText}>
+              {`¿Quieres eliminar "${todoPendingDeletion.title}"? Esta acción no se puede deshacer.`}
+            </Text>
+            <View style={styles.confirmActions}>
+              <Pressable
+                accessibilityLabel="Cancelar eliminación"
+                accessibilityRole="button"
+                disabled={isBusy}
+                onPress={cancelDeleteTodo}
+                style={({ pressed }) => [
+                  styles.confirmCancelButton,
+                  pressed && styles.actionButtonPressed,
+                  isBusy && styles.disabledControl,
+                ]}>
+                <Text style={styles.confirmCancelText}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Confirmar eliminación"
+                accessibilityRole="button"
+                disabled={isBusy}
+                onPress={confirmDeleteTodo}
+                style={({ pressed }) => [
+                  styles.confirmDeleteButton,
+                  pressed && styles.deleteButtonPressed,
+                  isBusy && styles.disabledControl,
+                ]}>
+                <Text style={styles.deleteText}>Eliminar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
   function renderCameraModal() {
     return (
       <Modal animationType="slide" onRequestClose={closeCamera} transparent visible={isCameraOpen}>
@@ -856,7 +1085,7 @@ export default function PiezarioTodoApp() {
               <View style={styles.cameraPermissionPanel}>
                 <Text style={styles.cameraPermissionTitle}>Falta permiso de cámara</Text>
                 <Text style={styles.cameraPermissionText}>
-                  Activa la cámara para tomar una foto y encajarla en esta pieza.
+                  Activa la cámara para tomar una foto y guardarla en este pendiente.
                 </Text>
               </View>
             )}
@@ -898,24 +1127,18 @@ export default function PiezarioTodoApp() {
 
   function renderLogoLockup() {
     return (
-      <View style={styles.logoLockup} accessibilityLabel="Logo de Piezario">
+      <View style={styles.logoLockup} accessibilityLabel="Logo de Alisto">
         <View style={styles.logoMark}>
-          <View style={[styles.puzzlePiece, styles.pieceA]}>
-            <View style={[styles.puzzleKnob, styles.knobRight]} />
-          </View>
-          <View style={[styles.puzzlePiece, styles.pieceB]}>
-            <View style={[styles.puzzleKnob, styles.knobBottom]} />
-          </View>
-          <View style={[styles.puzzlePiece, styles.pieceC]}>
-            <View style={[styles.puzzleKnob, styles.knobTop]} />
-          </View>
-          <View style={[styles.puzzlePiece, styles.pieceD]}>
-            <Text style={styles.logoLetter}>P</Text>
-          </View>
+          <View style={styles.logoListDot} />
+          <View style={styles.logoListLine} />
+          <View style={[styles.logoListDot, styles.logoListDotSecond]} />
+          <View style={[styles.logoListLine, styles.logoListLineSecond]} />
+          <View style={styles.logoCheckShort} />
+          <View style={styles.logoCheckLong} />
         </View>
         <View>
-          <Text style={styles.logoName}>Piezario</Text>
-          <Text style={styles.logoTagline}>Cada pieza en su lugar</Text>
+          <Text style={styles.logoName}>Alisto</Text>
+          <Text style={styles.logoTagline}>Pendientes en orden</Text>
         </View>
       </View>
     );
@@ -929,7 +1152,7 @@ export default function PiezarioTodoApp() {
         onPress={() => setIsPasswordVisible((visible) => !visible)}
         style={({ pressed }) => [styles.passwordToggle, pressed && styles.passwordTogglePressed]}>
         <MaterialIcons
-          color="#5B4265"
+          color="#275C5A"
           name={isPasswordVisible ? 'visibility-off' : 'visibility'}
           size={22}
         />
@@ -954,83 +1177,86 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     overflow: 'hidden',
-    backgroundColor: '#F6E8CF',
+    backgroundColor: '#EEF3EF',
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 24,
+    padding: 22,
   },
   cornerPiece: {
     position: 'absolute',
-    top: -72,
-    right: -58,
-    width: 190,
-    height: 190,
-    borderRadius: 42,
-    backgroundColor: '#F2B84B',
-    transform: [{ rotate: '18deg' }],
+    top: -96,
+    right: -88,
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: '#DDE9E4',
   },
   floatingPiece: {
     position: 'absolute',
-    left: -46,
-    bottom: 98,
-    width: 118,
-    height: 118,
-    borderRadius: 30,
-    backgroundColor: '#2DB7A3',
-    transform: [{ rotate: '-14deg' }],
+    left: -52,
+    bottom: 74,
+    width: 156,
+    height: 156,
+    borderRadius: 78,
+    backgroundColor: '#F0DDC4',
   },
   boardGrid: {
     position: 'absolute',
-    left: 24,
-    right: 24,
-    top: 42,
+    left: 26,
+    right: 26,
+    top: 54,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    opacity: 0.62,
   },
   gridDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#5B426529',
+    width: 1,
+    height: 34,
+    borderRadius: 1,
+    backgroundColor: '#AAB9B2',
   },
   loadingPanel: {
     width: '100%',
     maxWidth: 420,
     alignSelf: 'center',
     alignItems: 'center',
-    gap: 18,
-    margin: 'auto',
+    gap: 16,
     padding: 28,
-    borderRadius: 32,
-    borderWidth: 3,
-    borderColor: '#3E2A46',
-    backgroundColor: '#FFF9EC',
+    borderWidth: 1,
+    borderColor: '#D7E0DA',
+    borderRadius: 30,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#183A37',
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.12,
+    shadowRadius: 30,
+    elevation: 8,
   },
   loadingText: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   panel: {
     width: '100%',
-    maxWidth: 480,
+    maxWidth: 500,
     alignSelf: 'center',
-    gap: 30,
+    gap: 28,
     padding: 28,
-    borderRadius: 32,
-    borderWidth: 3,
-    borderColor: '#3E2A46',
-    backgroundColor: '#FFF9EC',
-    shadowColor: '#3E2A46',
+    borderWidth: 1,
+    borderColor: '#D7E0DA',
+    borderRadius: 30,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#183A37',
     shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.22,
-    shadowRadius: 28,
-    elevation: 16,
+    shadowOpacity: 0.14,
+    shadowRadius: 34,
+    elevation: 12,
   },
   boardPanel: {
-    maxWidth: 880,
+    maxWidth: 900,
   },
   logoLockup: {
     flexDirection: 'row',
@@ -1038,102 +1264,186 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   logoMark: {
-    width: 72,
-    height: 72,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    transform: [{ rotate: '-5deg' }],
+    position: 'relative',
+    width: 68,
+    height: 68,
+    borderWidth: 1,
+    borderColor: '#C8D5CF',
+    borderRadius: 22,
+    backgroundColor: '#F7FAF7',
   },
-  puzzlePiece: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#3E2A46',
-  },
-  pieceA: {
-    borderTopLeftRadius: 16,
-    backgroundColor: '#E85D75',
-  },
-  pieceB: {
-    borderTopRightRadius: 16,
-    marginLeft: -1,
-    backgroundColor: '#F2B84B',
-  },
-  pieceC: {
-    borderBottomLeftRadius: 16,
-    marginTop: -1,
-    backgroundColor: '#2DB7A3',
-  },
-  pieceD: {
-    borderBottomRightRadius: 16,
-    marginTop: -1,
-    marginLeft: -1,
-    backgroundColor: '#5B4265',
-  },
-  puzzleKnob: {
+  logoListDot: {
     position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
-    backgroundColor: '#FFF9EC',
+    left: 14,
+    top: 17,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#D89957',
   },
-  knobRight: {
-    right: -9,
-    top: 9,
+  logoListDotSecond: {
+    top: 32,
   },
-  knobBottom: {
-    bottom: -9,
-    left: 9,
+  logoListLine: {
+    position: 'absolute',
+    left: 26,
+    top: 19,
+    width: 24,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#9EB0A8',
   },
-  knobTop: {
-    top: -9,
-    left: 9,
+  logoListLineSecond: {
+    top: 34,
+    width: 18,
   },
-  logoLetter: {
-    color: '#FFF9EC',
-    fontSize: 23,
-    fontWeight: '900',
-    letterSpacing: -1,
+  logoCheckShort: {
+    position: 'absolute',
+    left: 20,
+    top: 44,
+    width: 13,
+    height: 5,
+    borderRadius: 4,
+    backgroundColor: '#275C5A',
+    transform: [{ rotate: '42deg' }],
+  },
+  logoCheckLong: {
+    position: 'absolute',
+    left: 30,
+    top: 39,
+    width: 27,
+    height: 5,
+    borderRadius: 4,
+    backgroundColor: '#275C5A',
+    transform: [{ rotate: '-45deg' }],
   },
   logoName: {
-    color: '#3E2A46',
-    fontSize: 28,
+    color: '#183A37',
+    fontSize: 30,
     fontWeight: '900',
-    letterSpacing: -0.7,
+    letterSpacing: -0.8,
   },
   logoTagline: {
     marginTop: 2,
-    color: '#8D4E5B',
+    color: '#63746E',
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.1,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   copy: {
     gap: 10,
   },
   eyebrow: {
-    color: '#2B8F82',
+    color: '#B36F2F',
     fontSize: 12,
     fontWeight: '900',
-    letterSpacing: 1.8,
+    letterSpacing: 1.7,
     textTransform: 'uppercase',
   },
   title: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 35,
     fontWeight: '900',
-    lineHeight: 39,
-    letterSpacing: -1.5,
+    lineHeight: 40,
+    letterSpacing: -1.4,
   },
   subtitle: {
-    color: '#6F5B4B',
+    color: '#5F706A',
     fontSize: 16,
-    lineHeight: 23,
+    lineHeight: 24,
+  },
+  welcomePanel: {
+    maxWidth: 760,
+  },
+  welcomeHero: {
+    gap: 20,
+  },
+  summaryMosaic: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  summaryPiece: {
+    flex: 1,
+    minHeight: 128,
+    justifyContent: 'space-between',
+    padding: 18,
+    borderWidth: 1,
+    borderRadius: 24,
+  },
+  summaryPiecePending: {
+    borderColor: '#E7C491',
+    backgroundColor: '#FFF3DF',
+  },
+  summaryPieceCompleted: {
+    borderColor: '#9BD1B3',
+    backgroundColor: '#EAF8F0',
+  },
+  summaryNumber: {
+    color: '#183A37',
+    fontSize: 44,
+    fontWeight: '900',
+    lineHeight: 48,
+    letterSpacing: -1.6,
+  },
+  summaryLabel: {
+    color: '#274640',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  summaryColumns: {
+    gap: 12,
+  },
+  summaryColumn: {
+    gap: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#D7E0DA',
+    borderRadius: 22,
+    backgroundColor: '#F7FAF7',
+  },
+  welcomeActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  welcomePrimaryButton: {
+    minHeight: 56,
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: '#275C5A',
+  },
+  summaryColumnTitle: {
+    color: '#183A37',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  summaryTaskList: {
+    maxHeight: 132,
+  },
+  summaryTaskListContent: {
+    gap: 6,
+    paddingRight: 8,
+  },
+  summaryTaskText: {
+    color: '#465B54',
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  summaryEmptyText: {
+    color: '#63746E',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
   },
   form: {
     gap: 18,
@@ -1142,18 +1452,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   label: {
-    color: '#4B354F',
+    color: '#274640',
     fontSize: 14,
     fontWeight: '900',
   },
   input: {
     minHeight: 54,
-    borderWidth: 2,
-    borderColor: '#D6BE99',
+    borderWidth: 1,
+    borderColor: '#C8D5CF',
     borderRadius: 16,
     paddingHorizontal: 18,
-    color: '#3E2A46',
-    backgroundColor: '#FFFDF7',
+    color: '#183A37',
+    backgroundColor: '#FAFCFA',
     fontSize: 16,
   },
   passwordInputShell: {
@@ -1173,23 +1483,21 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   passwordTogglePressed: {
-    backgroundColor: '#F2E2C7',
+    backgroundColor: '#E6EFEA',
   },
   button: {
     minHeight: 56,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
-    backgroundColor: '#5B4265',
+    backgroundColor: '#275C5A',
   },
   buttonPressed: {
     transform: [{ translateY: 2 }],
-    backgroundColor: '#4A3553',
+    backgroundColor: '#1F4A48',
   },
   buttonText: {
-    color: '#FFF9EC',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '900',
     letterSpacing: 0.1,
@@ -1200,35 +1508,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 12,
-    borderWidth: 2,
-    borderColor: '#D6BE99',
-    borderStyle: 'dashed',
+    borderWidth: 1,
+    borderColor: '#D7E0DA',
     borderRadius: 16,
-    backgroundColor: '#FFFDF7',
+    backgroundColor: '#F7FAF7',
   },
   registerOptionPressed: {
-    backgroundColor: '#F8EBD4',
+    backgroundColor: '#EAF2EE',
   },
   registerPiece: {
     width: 28,
     height: 28,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
-    backgroundColor: '#F2B84B',
-    transform: [{ rotate: '10deg' }],
+    borderRadius: 14,
+    backgroundColor: '#D89957',
   },
   registerCopy: {
     flex: 1,
     gap: 2,
   },
   registerQuestion: {
-    color: '#6F5B4B',
+    color: '#63746E',
     fontSize: 13,
     fontWeight: '800',
   },
   registerAction: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 15,
     fontWeight: '900',
   },
@@ -1238,10 +1542,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   statusError: {
-    color: '#C03232',
+    color: '#B42318',
   },
   statusSuccess: {
-    color: '#2B8F82',
+    color: '#237A57',
   },
   disabledControl: {
     opacity: 0.62,
@@ -1254,24 +1558,26 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     justifyContent: 'center',
     paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#C8D5CF',
     borderRadius: 14,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
-    backgroundColor: '#FFFDF7',
+    backgroundColor: '#FAFCFA',
   },
   logoutButtonPressed: {
-    backgroundColor: '#F8EBD4',
+    backgroundColor: '#EAF2EE',
   },
   logoutText: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 14,
     fontWeight: '900',
   },
   todoComposer: {
     gap: 10,
     padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#D89957',
     borderRadius: 22,
-    backgroundColor: '#F8EBD4',
+    backgroundColor: '#F7FAF7',
   },
   todoInputRow: {
     gap: 10,
@@ -1285,9 +1591,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 18,
     borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
-    backgroundColor: '#5B4265',
+    backgroundColor: '#275C5A',
   },
   todoList: {
     gap: 12,
@@ -1296,28 +1600,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     padding: 24,
-    borderWidth: 2,
-    borderColor: '#D6BE99',
-    borderStyle: 'dashed',
+    borderWidth: 1,
+    borderColor: '#C8D5CF',
     borderRadius: 22,
-    backgroundColor: '#FFFDF7',
+    backgroundColor: '#FAFCFA',
   },
   emptyPiece: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
-    backgroundColor: '#2DB7A3',
-    transform: [{ rotate: '-8deg' }],
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#D89957',
   },
   emptyTitle: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 18,
     fontWeight: '900',
   },
   emptyText: {
-    color: '#6F5B4B',
+    color: '#63746E',
     fontSize: 15,
     lineHeight: 21,
     textAlign: 'center',
@@ -1325,14 +1625,14 @@ const styles = StyleSheet.create({
   todoCard: {
     gap: 12,
     padding: 14,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
+    borderWidth: 1,
+    borderColor: '#D7E0DA',
     borderRadius: 22,
-    backgroundColor: '#FFFDF7',
+    backgroundColor: '#FFFFFF',
   },
   todoCardCompleted: {
-    borderColor: '#2B8F82',
-    backgroundColor: '#F2FBF4',
+    borderColor: '#A8D8BE',
+    backgroundColor: '#F4FBF7',
   },
   todoCheck: {
     width: 34,
@@ -1340,13 +1640,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#3E2A46',
+    borderColor: '#275C5A',
     borderRadius: 12,
-    backgroundColor: '#FFF9EC',
+    backgroundColor: '#FAFCFA',
   },
   todoCheckCompleted: {
-    borderColor: '#2B8F82',
-    backgroundColor: '#2B8F82',
+    borderColor: '#237A57',
+    backgroundColor: '#237A57',
   },
   todoCheckPressed: {
     transform: [{ scale: 0.95 }],
@@ -1356,18 +1656,18 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   todoTitle: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 17,
     fontWeight: '900',
     lineHeight: 23,
   },
   todoTitleCompleted: {
-    color: '#587063',
+    color: '#557068',
     textDecorationLine: 'line-through',
     opacity: 0.72,
   },
   todoMeta: {
-    color: '#8D7B68',
+    color: '#63746E',
     fontSize: 12,
     fontWeight: '900',
     textTransform: 'uppercase',
@@ -1378,8 +1678,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
-    color: '#3E2A46',
-    backgroundColor: '#E4F6F2',
+    color: '#183A37',
+    backgroundColor: '#E6EFEA',
     fontSize: 12,
     fontWeight: '900',
   },
@@ -1387,10 +1687,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 180,
     marginTop: 8,
-    borderWidth: 2,
-    borderColor: '#3E2A46',
+    borderWidth: 1,
+    borderColor: '#C8D5CF',
     borderRadius: 18,
-    backgroundColor: '#E8D8BE',
+    backgroundColor: '#E6EFEA',
   },
   editInput: {
     minHeight: 46,
@@ -1405,13 +1705,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#F2B84B',
+    backgroundColor: '#E6EFEA',
   },
   actionButtonPressed: {
     opacity: 0.76,
   },
   actionText: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -1420,10 +1720,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#2DB7A3',
+    backgroundColor: '#D89957',
   },
   photoActionText: {
-    color: '#FFF9EC',
+    color: '#183A37',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -1432,10 +1732,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#5B4265',
+    backgroundColor: '#275C5A',
   },
   locationActionText: {
-    color: '#FFF9EC',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -1444,10 +1744,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#E8D8BE',
+    backgroundColor: '#F0DDC4',
   },
   ghostActionText: {
-    color: '#4B354F',
+    color: '#183A37',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -1456,21 +1756,70 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#F8D6D6',
+    backgroundColor: '#FBE8E6',
   },
   deleteButtonPressed: {
-    backgroundColor: '#F2B8B8',
+    backgroundColor: '#F6D2CE',
   },
   deleteText: {
-    color: '#A12B2B',
+    color: '#B42318',
     fontSize: 13,
     fontWeight: '900',
+  },
+  confirmOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 22,
+    backgroundColor: '#10232199',
+  },
+  confirmPanel: {
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+    gap: 16,
+    padding: 22,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+  },
+  confirmTitle: {
+    color: '#183A37',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  confirmText: {
+    color: '#63746E',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  confirmCancelButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#E6EFEA',
+  },
+  confirmCancelText: {
+    color: '#183A37',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  confirmDeleteButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#FBE8E6',
   },
   cameraOverlay: {
     flex: 1,
     justifyContent: 'center',
     padding: 18,
-    backgroundColor: '#1D1222D9',
+    backgroundColor: '#102321D9',
   },
   cameraPanel: {
     maxWidth: 720,
@@ -1479,10 +1828,10 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     gap: 14,
     padding: 14,
-    borderWidth: 3,
-    borderColor: '#FFF9EC',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
     borderRadius: 28,
-    backgroundColor: '#3E2A46',
+    backgroundColor: '#183A37',
   },
   cameraPreview: {
     minHeight: 420,
@@ -1496,16 +1845,16 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 22,
     borderRadius: 20,
-    backgroundColor: '#FFF9EC',
+    backgroundColor: '#FFFFFF',
   },
   cameraPermissionTitle: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 21,
     fontWeight: '900',
     textAlign: 'center',
   },
   cameraPermissionText: {
-    color: '#6F5B4B',
+    color: '#63746E',
     fontSize: 15,
     lineHeight: 21,
     textAlign: 'center',
@@ -1520,10 +1869,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 14,
-    backgroundColor: '#FFF9EC',
+    backgroundColor: '#FFFFFF',
   },
   cameraGhostText: {
-    color: '#3E2A46',
+    color: '#183A37',
     fontSize: 14,
     fontWeight: '900',
   },
@@ -1534,6 +1883,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     borderRadius: 14,
-    backgroundColor: '#E85D75',
+    backgroundColor: '#D89957',
   },
 });
